@@ -2,15 +2,22 @@
  * 云函数单一入口：action 路由
  *
  * 两个调用来源共用一份业务逻辑：
- *   1. 小程序  wx.cloud.callFunction  → event = { action, payload, clientId }
- *   2. H5      HTTP 访问服务 POST     → event = { httpMethod, body, ... }
+ *   1. 小程序  wx.cloud.callFunction  → event = { action, payload }
+ *   2. H5      HTTP 访问服务 POST     → event = { httpMethod, body, headers, ... }
  *
- * 好处：一次部署覆盖两端，H5 与小程序看到的是同一棵树。
+ * 一次部署覆盖两端，H5 与小程序看到的是同一棵树。
+ *
+ * 2026-11 修复：
+ *   1. H5 身份改为服务端签发 uid + HMAC 验签（原来直接用 clientId，可冒充他人）
+ *   2. CORS 从 '*' 收敛为可配置白名单（FT_ALLOWED_ORIGIN）
+ *   3. 补 IP 解析，供 lib/guard.js 做频控
+ *   4. 补 register 动作，签发会话
  */
 
 const cloud = require('wx-server-sdk')
 const resp = require('./lib/resp')
 const secH5 = require('./lib/secH5')
+const session = require('./lib/session')
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 
@@ -24,17 +31,30 @@ const handlers = {
   track: require('./actions/track')
 }
 
-const CORS_HEADERS = {
-  'Content-Type': 'application/json; charset=utf-8',
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'Content-Type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Cache-Control': 'no-store'
+/** 允许跨域的来源：逗号分隔；默认 * ，但会在日志里提示收敛 */
+const ALLOW_ORIGIN = process.env.FT_ALLOWED_ORIGIN || '*'
+
+function corsHeaders(origin) {
+  let allow = ALLOW_ORIGIN
+  if (ALLOW_ORIGIN !== '*') {
+    const list = ALLOW_ORIGIN.split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+    allow = list.indexOf(origin) > -1 ? origin : list[0] || ''
+  }
+  return {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Access-Control-Allow-Origin': allow,
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Cache-Control': 'no-store',
+    Vary: 'Origin'
+  }
 }
 
-/** HTTP 访问服务转发过来时，event 带 httpMethod / requestContext */
+/** HTTP 访问服务转发过来时，event 带 httpMethod / requestContext / headers */
 function isHttpEvent(event) {
-  return !!(event && (event.httpMethod || event.requestContext || event.path))
+  return !!(event && (event.httpMethod || event.requestContext || event.headers))
 }
 
 function parseBody(event) {
@@ -51,14 +71,27 @@ function parseBody(event) {
   }
 }
 
-/** H5 的身份：clientId（浏览器本地生成的 uuid）映射成伪 openid */
-function h5Openid(clientId) {
-  const id = String(clientId || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40)
-  if (!id) return ''
-  return 'h5_' + id
+/** 从 HTTP 事件里取真实客户端 IP（云开发会把链式代理塞在 x-forwarded-for） */
+function clientIp(event) {
+  const h = event.headers || {}
+  const raw =
+    h['x-forwarded-for'] ||
+    h['X-Forwarded-For'] ||
+    h['x-real-ip'] ||
+    (event.requestContext && event.requestContext.identity && event.requestContext.identity.sourceIp) ||
+    ''
+  return String(raw).split(',')[0].trim()
 }
 
-async function dispatch({ action, payload, clientId, openid, isH5 }) {
+/** 兜底：未配置会话密钥时，退回旧的 clientId 伪身份（可伪造，仅演示用） */
+function legacyOpenid(clientId) {
+  const id = String(clientId || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40)
+  return id ? 'h5_' + id : ''
+}
+
+let warnedNoSecret = false
+
+async function dispatch({ action, payload, openid, clientId, isH5, ip }) {
   const handler = handlers[action]
   if (!handler) return resp.fail(4001, '未知操作: ' + action)
 
@@ -68,6 +101,7 @@ async function dispatch({ action, payload, clientId, openid, isH5 }) {
     _: cloud.database().command,
     openid,
     clientId,
+    ip,
     payload: payload || {},
     isH5: !!isH5
   }
@@ -88,61 +122,93 @@ async function dispatch({ action, payload, clientId, openid, isH5 }) {
 
 /** 小程序调用入口 */
 async function handleCall(event) {
-  const { action, payload = {}, clientId = '' } = event || {}
+  const { action, payload = {} } = event || {}
   const wxContext = cloud.getWXContext()
-
   if (!wxContext.OPENID) return resp.fail(4010, '请在小程序内打开')
 
   return dispatch({
     action,
     payload,
-    clientId,
+    clientId: '',
     openid: wxContext.OPENID,
-    isH5: false
+    isH5: false,
+    ip: ''
   })
 }
 
 /** H5 调用入口 */
 async function handleHttp(event) {
   const method = (event.httpMethod || 'POST').toUpperCase()
+  const origin = (event.headers && (event.headers.origin || event.headers.Origin)) || ''
+  const headers = corsHeaders(origin)
+
   if (method === 'OPTIONS') {
-    return { statusCode: 204, headers: CORS_HEADERS, body: '' }
+    return { statusCode: 204, headers, body: '' }
   }
   if (method !== 'POST') {
-    return {
-      statusCode: 405,
-      headers: CORS_HEADERS,
-      body: JSON.stringify(resp.fail(4005, '只支持 POST'))
-    }
+    return { statusCode: 405, headers, body: JSON.stringify(resp.fail(4005, '只支持 POST')) }
   }
 
   const body = parseBody(event)
   if (!body) {
+    return { statusCode: 400, headers, body: JSON.stringify(resp.fail(4001, '请求体不是合法 JSON')) }
+  }
+
+  const ip = clientIp(event)
+  const action = body.action
+
+  // 签发会话：不需要已有身份
+  if (action === 'register') {
+    if (!session.enabled) {
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify(resp.fail(4010, '服务端未配置 FT_SESSION_SECRET，暂不能签发身份'))
+      }
+    }
     return {
-      statusCode: 400,
-      headers: CORS_HEADERS,
-      body: JSON.stringify(resp.fail(4001, '请求体不是合法 JSON'))
+      statusCode: 200,
+      headers,
+      body: JSON.stringify(resp.ok(session.issue()))
     }
   }
 
-  const openid = h5Openid(body.clientId)
-  if (!openid) {
-    return {
-      statusCode: 400,
-      headers: CORS_HEADERS,
-      body: JSON.stringify(resp.fail(4001, '缺少 clientId'))
+  // 验签
+  let openid = ''
+  if (session.enabled) {
+    if (!session.verify(body.uid, body.token)) {
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify(resp.fail(4010, '会话已失效，请刷新页面'))
+      }
+    }
+    openid = body.uid
+  } else {
+    openid = legacyOpenid(body.clientId)
+    if (!warnedNoSecret) {
+      warnedNoSecret = true
+      console.warn('[tree] 未配置 FT_SESSION_SECRET：H5 身份退回 clientId，可被冒充，仅可用于本地演示')
+    }
+    if (!openid) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify(resp.fail(4001, '缺少 clientId'))
+      }
     }
   }
 
   const result = await dispatch({
-    action: body.action,
+    action,
     payload: body.payload,
     clientId: body.clientId,
     openid,
-    isH5: true
+    isH5: true,
+    ip
   })
 
-  return { statusCode: 200, headers: CORS_HEADERS, body: JSON.stringify(result) }
+  return { statusCode: 200, headers, body: JSON.stringify(result) }
 }
 
 exports.main = async (event) => {

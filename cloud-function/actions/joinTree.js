@@ -1,6 +1,9 @@
 const { COLLECTIONS, publicNode } = require('../lib/db')
 const { computeScore } = require('../lib/rank')
 const sec = require('../lib/sec')
+const guard = require('../lib/guard')
+const theme = require('../lib/theme')
+const L = require('../lib/limits')
 
 function badRequest(message) {
   const e = new Error(message)
@@ -8,15 +11,9 @@ function badRequest(message) {
   return e
 }
 
-/** 读取某树种的排序规则（服务端为准，不信任客户端传参） */
-async function getSortMode(ctx, treeId) {
-  try {
-    const res = await ctx.db.collection(COLLECTIONS.CONFIGS).doc('app').get()
-    const themes = (res.data && res.data.themes) || {}
-    return (themes[treeId] && themes[treeId].sortMode) || 'invite'
-  } catch (e) {
-    return 'invite'
-  }
+/** 码点长度：emoji 记 1 个，与前端 Array.from 口径一致 */
+function charLen(s) {
+  return Array.from(String(s || '')).length
 }
 
 /**
@@ -33,9 +30,13 @@ module.exports = async (ctx) => {
 
   const text = (wish || '').trim()
   if (!text) throw badRequest('写一句心愿再挂上去吧')
-  if (Array.from(text).length > 30) throw badRequest('心愿最多 30 个字')
+  if (charLen(text) > L.WISH_MAX) throw badRequest(`心愿最多 ${L.WISH_MAX} 个字`)
 
-  const sortMode = await getSortMode(ctx, treeId)
+  // 挂树频控：同一 IP 每小时最多 N 个节点，挡批量灌数据
+  const allowJoin = await guard.checkJoinBurst(ctx, L.JOIN_PER_HOUR)
+  if (!allowJoin) throw badRequest('这条网线挂得有点多，休息一会儿再来')
+
+  const sortMode = await theme.getSortMode(ctx, treeId)
 
   // 文本内容安全
   //   小程序：云调用 msgSecCheck，不通过入待审队列（前台显示"审核中"）
@@ -50,12 +51,17 @@ module.exports = async (ctx) => {
   }
   const wishStatus = passed ? 1 : 0
 
-  // H5 传的是压缩后的 dataURL（约 8–30KB），超限直接丢弃，避免撑爆单条记录
-  const avatarValue = avatarFileId && avatarFileId.length <= 200 * 1024 ? avatarFileId : ''
+  // H5 传的是压缩后的 dataURL（约 8–15KB）；超限直接报错，不再静默丢弃头像
+  const avatarValue = avatarFileId || ''
+  if (avatarValue.length > L.AVATAR_MAX_BYTES) {
+    throw badRequest('头像图片太大了，换一张小一点的')
+  }
 
   const coll = ctx.db.collection(COLLECTIONS.NODES)
   const now = Date.now()
-  const safeNickname = Array.from((nickname || '').trim() || '匿名').slice(0, 12).join('')
+  const safeNickname = Array.from((nickname || '').trim() || '匿名')
+    .slice(0, L.NICK_MAX)
+    .join('')
 
   const existRes = await coll.where({ treeId, openid: ctx.openid }).limit(1).get()
   let nodeId = ''
@@ -68,6 +74,8 @@ module.exports = async (ctx) => {
         nickname: safeNickname,
         wish: text,
         wishStatus,
+        // sortMode 必须落库：blessNode 靠它算分，读不到就会退回 invite 口径
+        sortMode,
         score: computeScore(
           { blessCount: doc.blessCount || 0, inviteCount: doc.inviteCount || 0 },
           sortMode
@@ -84,10 +92,12 @@ module.exports = async (ctx) => {
         nickname: safeNickname,
         wish: text,
         wishStatus,
+        sortMode,
         avatarFileId: avatarValue,
         blessCount: 0,
         inviteCount: 0,
         score: 0,
+        ip: ctx.ip || '',
         createdAt: now,
         updatedAt: now
       }
@@ -106,8 +116,11 @@ module.exports = async (ctx) => {
     try {
       const logs = ctx.db.collection(COLLECTIONS.INVITE_LOGS)
       const dup = await logs.where({ nodeId: inviter, openid: ctx.openid }).limit(1).get()
-      if (!dup.data || !dup.data.length) {
-        await logs.add({ data: { nodeId: inviter, openid: ctx.openid, createdAt: now } })
+      const quota = await guard.checkDailyLimit(ctx, 'invite', L.INVITE_DAILY)
+      if ((!dup.data || !dup.data.length) && quota) {
+        await logs.add({
+          data: { nodeId: inviter, treeId, openid: ctx.openid, ip: ctx.ip || '', createdAt: now }
+        })
         const inviterRes = await coll.doc(inviter).get()
         if (inviterRes.data) {
           const d = inviterRes.data
@@ -128,5 +141,6 @@ module.exports = async (ctx) => {
   }
 
   const fresh = await coll.doc(nodeId).get()
-  return { node: publicNode(fresh.data, ctx.openid) }
+  // 与 listNodes 同一口径：非 invite 档不把 inviteCount 回给客户端
+  return { node: publicNode(fresh.data, ctx.openid, { hideInvite: sortMode !== 'invite' }) }
 }

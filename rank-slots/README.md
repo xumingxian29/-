@@ -2,11 +2,14 @@
 
 **目录** `rank-slots/`　**文件** <code>rank.js</code> · <code>rank.cloud.js</code>
 
-纯函数，零平台依赖：算分、排序、找名次、把节点分配到主题槽位。
+纯函数，零平台依赖：比较器排序、找名次、把节点分配到主题槽位。
+
+> 2026-11 起排序改用 <code>compareNodes</code>（主维度 → 次维度 → createdAt），不再依赖 <code>score</code>。
+> <code>computeScore</code> 保留为兼容字段，注释里已标明「不要用它排序」。
 
 ## 对外接口
 
-<code>computeScore(node, sortMode)</code> · <code>sortNodes(nodes, sortMode)</code> · <code>findMyRank(sorted, myId)</code> · <code>makeGridSlots(count, rows)</code> · <code>assignSlots(sortedNodes, layout)</code>
+<code>compareNodes(a, b, sortMode)</code> · <code>sortNodes(nodes, sortMode)</code> · <code>computeScore(node, sortMode)</code>（兼容） · <code>findMyRank(sorted, myId)</code> · <code>makeGridSlots(count, {top, bottom, rows})</code> · <code>assignSlots(sortedNodes, layout)</code>
 
 ## 依赖
 

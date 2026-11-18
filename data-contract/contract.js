@@ -3,7 +3,7 @@
  * 页面层看到的世界就到这里为止：一个 TreeApi，两个实现，同一种返回形状。
  */
 
-/** @typedef {'cloud'|'local'} ApiMode */
+/** @typedef {'cloud'|'local'|'remote'} ApiMode */
 /** @typedef {'invite'|'bless'|'display'} SortKey */
 
 /**
@@ -43,7 +43,9 @@
  * @property {(opts?:{treeId?:string}) => Promise<void>} init
  * @property {(q:{treeId:string}) => Promise<TreeMeta>} getTree
  * @property {(q:{treeId:string, sort?:SortKey, page?:number, size?:number}) => Promise<{list:TreeNode[], total:number, myRank:number|null, hasMore:boolean}>} listNodes
+ *   sort 只是提示；服务端以主题配置为准，客户端传什么都不会改变排序口径
  * @property {(q:{treeId:string, avatar:UploadInput, wish:string, nickname:string, inviter?:string, clientId:string}) => Promise<{node:TreeNode}>} joinTree
+ *   avatar 体积上限见 limits.js；超限抛 PARAM 错误，不会静默丢头像
  * @property {(q:{treeId:string, nodeId:string, clientId:string}) => Promise<{blessCount:number, already:boolean}>} blessNode
  * @property {(q:{treeId:string, nodeId:string, inviter:string}) => Promise<{inviteCount:number}>} recordInvite
  * @property {(q:{treeId:string, clientId:string}) => Promise<TreeNode|null>} getMyNode

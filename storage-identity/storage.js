@@ -19,6 +19,12 @@ export function readJSON(name, fallback = null) {
     if (raw === '' || raw === null || raw === undefined) return fallback
     return typeof raw === 'string' ? JSON.parse(raw) : raw
   } catch (e) {
+    // 解析失败说明这条数据坏了：直接删掉，否则每次读都失败、永远回不到正常态
+    try {
+      uni.removeStorageSync(key(name))
+    } catch (err) {
+      /* ignore */
+    }
     return fallback
   }
 }
@@ -46,13 +52,31 @@ export function removeKey(name) {
   }
 }
 
-/** 生成/复用本机客户端 ID（H5 无 openid，用它在本地模式做身份与祝福去重） */
+/** 生成/复用本机客户端 ID（仅用于本地模式与回落身份，不是远程模式的凭证） */
 export function getClientId() {
   const existing = readJSON('clientId', '')
   if (existing) return existing
   const id = 'c_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10)
   writeJSON('clientId', id)
   return id
+}
+
+/**
+ * 远程会话（H5 用）：服务端签发的 { uid, token }
+ * uid 是不可猜的随机串，token 是 HMAC 签名——换机器/清缓存就换身份，
+ * 但别人无法用你的 clientId 冒充你。
+ */
+export function readSession() {
+  const s = readJSON('session', null)
+  return s && s.uid && s.token ? s : null
+}
+
+export function writeSession(session) {
+  return writeJSON('session', session || null)
+}
+
+export function clearSession() {
+  removeKey('session')
 }
 
 export function uuid() {

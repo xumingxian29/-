@@ -5,6 +5,8 @@
  * 页面与组件只调用 pickAvatar()，永远不直接碰 chooseImage / document / Image。
  */
 
+import { AVATAR_TARGET_PX, AVATAR_QUALITY, AVATAR_CLIENT_MAX_BYTES } from './limits'
+
 /**
  * @typedef {Object} PickedAvatar
  * @property {string} path    本地临时路径（可直接用于 <image src>）
@@ -29,7 +31,7 @@ export function getImageInfo(path) {
  * H5 端：把选中的图压缩成 ≤max×max 的 dataURL
  * 目的有三：本地可持久化（blob URL 刷新即失效）、海报绘制不跨域、体积可控
  */
-function shrinkToDataUrl(src, max = 200, quality = 0.78) {
+function shrinkToDataUrl(src, max = 160, quality = 0.72) {
   return new Promise((resolve, reject) => {
     const img = new Image()
     img.onload = () => {
@@ -46,6 +48,24 @@ function shrinkToDataUrl(src, max = 200, quality = 0.78) {
     img.onerror = () => reject(new Error('图片读取失败'))
     img.src = src
   })
+}
+
+/**
+ * 逐档压缩，直到体积落到客户端上限之内
+ * 原来只有一档（200px/0.78），超大原图压完仍可能超限，然后被后端静默丢掉。
+ */
+async function compressUntilFits(src) {
+  const attempts = [
+    { px: AVATAR_TARGET_PX, q: AVATAR_QUALITY },
+    { px: 128, q: 0.66 },
+    { px: 96, q: 0.6 }
+  ]
+  let last = null
+  for (const a of attempts) {
+    last = await shrinkToDataUrl(src, a.px, a.q)
+    if (last.dataUrl.length <= AVATAR_CLIENT_MAX_BYTES) return last
+  }
+  return last
 }
 // #endif
 
@@ -66,7 +86,10 @@ export function pickAvatar() {
           const info = await getImageInfo(path)
 
           // #ifdef H5
-          const out = await shrinkToDataUrl(path, 200)
+          const out = await compressUntilFits(path)
+          if (out.dataUrl.length > AVATAR_CLIENT_MAX_BYTES) {
+            return reject(new Error('这张图压不小，换一张试试'))
+          }
           resolve({ path, width: out.width, height: out.height, dataUrl: out.dataUrl })
           // #endif
 
@@ -82,12 +105,17 @@ export function pickAvatar() {
   })
 }
 
-/** 生成默认头像（纯前端，不依赖网络） */
+/**
+ * 生成默认头像（纯前端，不依赖网络）
+ *
+ * ⚠️ 仅 H5 可用：小程序 <image> 不支持 svg dataURL，所以 MP 端返回空串，
+ * 由组件用「首字 + 主题色」自行兜底（见 AvatarPin.vue 的 pin__ph）。
+ */
 export function makeFallbackAvatar(text = '?', bg = '#2F6B52') {
-  const ch = (text || '?').slice(0, 1)
+  const ch = escapeXml(Array.from(String(text))[0] || '?')
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128">` +
-    `<rect width="128" height="128" fill="${bg}"/>` +
+    `<rect width="128" height="128" fill="${escapeXml(bg)}"/>` +
     `<text x="64" y="82" font-size="60" fill="#F5F3EC" text-anchor="middle" ` +
     `font-family="PingFang SC,Microsoft YaHei,sans-serif">${ch}</text></svg>`
   // #ifdef H5
@@ -96,4 +124,14 @@ export function makeFallbackAvatar(text = '?', bg = '#2F6B52') {
   // #ifndef H5
   return ''
   // #endif
+}
+
+/** SVG 里拼用户输入必须转义，否则昵称带 < & 会把图形打坏 */
+function escapeXml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
 }

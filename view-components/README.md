@@ -1,8 +1,10 @@
 # 17 渲染组件块
 
-**目录** `view-components/`　**文件** <code>TreeStage.vue</code> · <code>AvatarPin.vue</code> · <code>JoinSheet.vue</code> · <code>PosterDialog.vue</code>
+**目录** `view-components/`　**文件** <code>TreeStage.vue</code> · <code>AvatarPin.vue</code> · <code>JoinSheet.vue</code> · <code>PosterDialog.vue</code> · <code>style.js</code>
 
 舞台 + 头像挂件 + 挂树面板 + 海报弹窗。四个组件吃 theme 对象，不写死任何颜色与文案。
+
+<code>style.js</code> 把 theme.tokens 转成 <code>--ft-*</code> CSS 变量（含 <code>--ft-on-accent</code>），放到 <code>src/utils/style.js</code>。
 
 ## 对外接口
 

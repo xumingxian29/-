@@ -6,6 +6,7 @@
 import api from '@/core'
 import { getTheme } from '@/themes'
 import { getClientId } from '@/core/storage'
+import { WALL_PAGE_SIZE } from '@/core/limits'
 
 let currentTheme = getTheme('christmas')
 
@@ -21,8 +22,8 @@ function tid(treeId) {
   return treeId || currentTheme.meta.treeId
 }
 
-/** 拉取整棵树（G0 场景一次拿全，G2 可分页） */
-export async function fetchWall({ treeId, sort, size = 200 } = {}) {
+/** 拉取整棵树（一屏 WALL_PAGE_SIZE，两端同一口径） */
+export async function fetchWall({ treeId, sort, size = WALL_PAGE_SIZE } = {}) {
   const t = tid(treeId)
   return api.listNodes({
     treeId: t,

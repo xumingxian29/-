@@ -30,8 +30,8 @@ export const DEFAULT_TREE_ID = 'christmas'
 // 强制指定主题（留空则按 themes/index.js 的日期规则自动选择）
 export const FORCED_THEME_ID = ''
 
-// 是否允许在 H5 端使用本地模拟数据（API_BASE 为空时的兜底，G0 演示必需）
-export const ALLOW_LOCAL_MODE = true
+// 说明：原先这里有个 ALLOW_LOCAL_MODE 开关，全仓没人读取（改了没反应），已删除。
+// H5 是否走本地模式只看 API_BASE 是否为空，见 platform-switch/index.js。
 
 // ------- 以下为「挂到公众号」才需要，可先留空 -------
 

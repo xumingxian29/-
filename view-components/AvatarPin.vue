@@ -1,13 +1,17 @@
 <template>
   <view class="pin" :style="pinStyle" @click.stop="$emit('select', item)">
-    <view class="pin__ring" :class="{ 'is-mine': item.node.mine }">
-      <image
-        v-if="item.node.avatarUrl"
-        class="pin__img"
-        :src="item.node.avatarUrl"
-        mode="aspectFill"
-      />
-      <view v-else class="pin__ph">{{ initial }}</view>
+    <!-- 旋转只作用在头像环上：徽标和"我"字跟着转就歪了 -->
+    <view class="pin__rot" :style="rotStyle">
+      <view class="pin__ring" :class="{ 'is-mine': item.node.mine }">
+        <image
+          v-if="showImg"
+          class="pin__img"
+          :src="item.node.avatarUrl"
+          mode="aspectFill"
+          @error="showImg = false"
+        />
+        <view v-else class="pin__ph">{{ initial }}</view>
+      </view>
     </view>
 
     <view v-if="item.node.mine" class="pin__me">我</view>
@@ -19,7 +23,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 const props = defineProps({
   item: { type: Object, required: true },
@@ -27,16 +31,33 @@ const props = defineProps({
 })
 defineEmits(['select'])
 
-const initial = computed(() => (props.item.node.nickname || '?').slice(0, 1))
+// 头像加载失败（临时链接过期 / 云存储 404）时退回首字占位，别留一个空圈
+const showImg = ref(!!props.item.node.avatarUrl)
+watch(
+  () => props.item.node.avatarUrl,
+  (v) => {
+    showImg.value = !!v
+  }
+)
+
+// Array.from 按码点取首字：slice(0,1) 会把 emoji 劈成半个代理对，显示成乱码方块
+const initial = computed(() => Array.from(String(props.item.node.nickname || '?'))[0] || '?')
 
 const pinStyle = computed(() => {
   const s = props.item.slot || { x: 0.5, y: 0.5, scale: 1, rotate: 0, layer: 3 }
+  const d = Math.round(props.size * (s.scale || 1))
   return {
     left: s.x * 100 + '%',
     top: s.y * 100 + '%',
-    width: Math.round(props.size * (s.scale || 1)) + 'px',
-    height: Math.round(props.size * (s.scale || 1)) + 'px',
-    zIndex: 100 + (s.layer || 3) + (props.item.node.mine ? 50 : 0),
+    width: d + 'px',
+    height: d + 'px',
+    zIndex: 100 + (s.layer || 3) + (props.item.node.mine ? 50 : 0)
+  }
+})
+
+const rotStyle = computed(() => {
+  const s = props.item.slot || {}
+  return {
     transform: `translate(-50%, -50%) rotate(${s.rotate || 0}deg)`
   }
 })
@@ -45,9 +66,11 @@ const pinStyle = computed(() => {
 <style scoped>
 .pin {
   position: absolute;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+}
+
+.pin__rot {
+  width: 100%;
+  height: 100%;
 }
 
 .pin__ring {
@@ -91,7 +114,8 @@ const pinStyle = computed(() => {
   padding: 0 4px;
   border-radius: 6px;
   background: var(--ft-accent);
-  color: #2b1a17;
+  /* 深色主题下 accent 可能偏暗，颜色必须能被主题覆盖，不能写死 */
+  color: var(--ft-on-accent, #2b1a17);
   white-space: nowrap;
 }
 
@@ -104,7 +128,7 @@ const pinStyle = computed(() => {
   padding: 0 3px;
   border-radius: 7px;
   background: var(--ft-accent);
-  color: #2b1a17;
+  color: var(--ft-on-accent, #2b1a17);
   font-size: 9px;
   line-height: 14px;
   text-align: center;

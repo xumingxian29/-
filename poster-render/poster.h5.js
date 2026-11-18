@@ -42,6 +42,7 @@ export async function makePoster(opts) {
     rank: opts.rank || null
   })
 
-  return { dataUrl: canvas.toDataURL('image/png'), width: W, height: H }
+  // JPEG：750×1000 的 PNG 约 1–2MB，JPEG(0.92) 约 150KB，内存和传输都更省
+  return { dataUrl: canvas.toDataURL('image/jpeg', 0.92), width: W, height: H }
 }
 // #endif

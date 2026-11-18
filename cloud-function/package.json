@@ -1,0 +1,11 @@
+{
+  "name": "tree",
+  "version": "2.0.0",
+  "description": "节日互动树：单入口 action 路由（小程序 callFunction + H5 HTTP 访问服务共用）",
+  "main": "index.js",
+  "private": true,
+  "type": "commonjs",
+  "dependencies": {
+    "wx-server-sdk": "~2.6.3"
+  }
+}

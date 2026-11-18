@@ -9,6 +9,7 @@
 import { ApiError, ErrCode, toApiError, unwrap } from '../errors'
 import { getClientId } from '../storage'
 import { CLOUD_ENV_ID } from '../env'
+import { WALL_PAGE_SIZE, WISH_MAX } from '../limits'
 
 let inited = false
 const urlCache = {} // fileID -> { url, expireAt }
@@ -53,7 +54,7 @@ export default {
     return call('getTree', { treeId })
   },
 
-  async listNodes({ treeId, sort = 'invite', page = 1, size = 30 }) {
+  async listNodes({ treeId, sort = 'invite', page = 1, size = WALL_PAGE_SIZE }) {
     const data = await call('listNodes', { treeId, sort, page, size })
     // 头像统一走临时链接（cloud:// 也能显示，但 H5 复用同一套组件时更稳）
     const ids = (data.list || []).map((n) => n.avatar).filter(Boolean)
@@ -66,6 +67,14 @@ export default {
 
   async joinTree({ treeId, avatar, wish, nickname, inviter }) {
     ensureCloud()
+
+    // 先做本地校验再上传：否则心愿被服务端拒掉时，云存储里会留下孤儿头像
+    const text = (wish || '').trim()
+    if (!text) throw new ApiError(ErrCode.PARAM, '写一句心愿再挂上去吧')
+    if (Array.from(text).length > WISH_MAX) {
+      throw new ApiError(ErrCode.PARAM, `心愿最多 ${WISH_MAX} 个字`)
+    }
+
     let fileID = ''
     if (avatar && avatar.path) {
       const ext = (avatar.path.match(/\.(\w+)$/) || [, 'jpg'])[1]
@@ -75,14 +84,23 @@ export default {
       // 上传后短期内直接用本地路径显示，避免多一次网络请求
       urlCache[fileID] = { url: avatar.path, expireAt: Date.now() + 3600 * 1000 }
     }
-    const res = await call('joinTree', {
-      treeId,
-      nickname,
-      wish,
-      avatarFileId: fileID,
-      inviter: inviter || ''
-    })
-    return res
+
+    try {
+      return await call('joinTree', {
+        treeId,
+        nickname,
+        wish: text,
+        avatarFileId: fileID,
+        inviter: inviter || ''
+      })
+    } catch (e) {
+      // 落库失败就把刚传的文件删掉，别让云存储变成垃圾场
+      if (fileID) {
+        delete urlCache[fileID]
+        wx.cloud.deleteFile({ fileList: [fileID] }).catch(() => {})
+      }
+      throw e
+    }
   },
 
   async blessNode({ treeId, nodeId }) {

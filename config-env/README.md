@@ -1,8 +1,11 @@
 # 01 环境配置块
 
-**目录** `config-env/`　**文件** <code>env.js</code>
+**目录** `config-env/`　**文件** <code>env.js</code> · <code>limits.js</code>
 
 全工程唯一的可配置面：云开发环境 ID、H5 后端地址、主题开关、分享文案。
+
+<code>limits.js</code> 是前后端必须一致的数值口径（心愿 30 / 昵称 12 / 分页 60 / 头像 40KB），
+对应的云端副本是 <code>cloud-function/lib/limits.js</code>，<code>npm run verify</code> 会对拍两边数值。
 
 ## 对外接口
 

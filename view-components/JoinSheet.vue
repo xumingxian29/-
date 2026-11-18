@@ -15,7 +15,7 @@
           class="sheet__input"
           :placeholder="theme.copy.nicknamePlaceholder"
           placeholder-class="ph"
-          :maxlength="12"
+          :maxlength="NICK_MAX"
         />
       </view>
 
@@ -24,9 +24,9 @@
         class="sheet__textarea"
         :placeholder="theme.copy.wishPlaceholder"
         placeholder-class="ph"
-        :maxlength="theme.copy.wishMax"
+        :maxlength="WISH_MAX"
       />
-      <view class="sheet__count">{{ wish.length }}/{{ theme.copy.wishMax }}</view>
+      <view class="sheet__count">{{ wishCount }}/{{ WISH_MAX }}</view>
 
       <view class="agree" @click="agreed = !agreed">
         <view class="agree__box" :class="{ 'is-on': agreed }"></view>
@@ -49,6 +49,7 @@ import { requirePrivacyAuthorize } from '@/core/privacy'
 import { submitJoin } from '@/api/tree'
 import { track, EVENTS } from '@/api/track'
 import { tokensToVars } from '@/utils/style'
+import { WISH_MAX, NICK_MAX } from '@/core/limits'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -66,6 +67,9 @@ const agreed = ref(false)
 const submitting = ref(false)
 
 const vars = computed(() => tokensToVars(props.theme.tokens))
+
+// 按码点计数：emoji 记 1 个，与云端 Array.from 口径一致（wish.length 会算 2）
+const wishCount = computed(() => Array.from(wish.value || '').length)
 
 watch(
   () => props.visible,

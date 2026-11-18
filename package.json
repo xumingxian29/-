@@ -1,0 +1,13 @@
+{
+  "name": "festival-theme-core",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "节日互动换皮小程序核心代码块（uni-app + 微信云开发）",
+  "scripts": {
+    "verify": "node scripts/verify.js",
+    "test": "node scripts/test-core.js",
+    "test:cloud": "node scripts/test-cloud.js",
+    "check": "node scripts/verify.js && node scripts/test-core.js && node scripts/test-cloud.js"
+  }
+}

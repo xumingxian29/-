@@ -75,6 +75,7 @@ export default {
     colorPrimary: '#0B3D2E',
     colorAccent: '#E8B84B',
     colorAccentSoft: 'rgba(232, 184, 75, 0.22)',
+    colorOnAccent: '#2B1A17',
     colorText: '#F5F3EC',
     colorTextSub: 'rgba(245, 243, 236, 0.68)',
     colorPinRing: '#E8B84B',
