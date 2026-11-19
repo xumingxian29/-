@@ -4,13 +4,17 @@
  * 分装清单（每块单一职责，可单独替换）：
  *   config.js     常量：画布尺寸、排版规则、存储 key
  *   theme.js      从 themes/*.js 的 card 段取配置，缺失自动回退
+ *   random.js     确定性随机：seed ↔ 短码、配色×角色×粒子 组合
+ *   safety.js     内容安全闸：国旗/地名/敬称/手机号扫描与兜底
  *   text.js       字体串拼装 + 折行 + 自动降字号
- *   motifs.js     雪花 / 麋鹿 / 圣诞树，全矢量路径
+ *   mascots.js    可爱角色：雪人/企鹅/姜饼人/小熊/礼物/铃铛/袜子/花环
+ *   motifs.js     图形调度（含老的雪花/麋鹿/树，保证旧链接仍能画）
  *   layout.js     版面比例计算 + 合法性自检
  *   render.js     drawCard(ctx, spec) 纯绘制
  *   state.js      选择状态与本地记忆，脏数据收敛
  *   export.h5.js  H5 导出：blob + 下载 + 微信长按兜底
- *   export.js     导出壳选择（将来接小程序只改这里）
+ *   export.mp.js  小程序导出：Canvas 2D 节点 + canvasToTempFilePath + 存相册
+ *   export.js     导出壳选择（整条线唯一的平台分叉点）
  *   share.js      分享链接与分享动作
  *
  * 页面只 import 这个文件，不直接摸内部模块。
@@ -19,6 +23,7 @@
 export {
   CARD_PATH,
   CARD_CANVAS,
+  CARD_CANVAS_ID,
   CARD_TEXT,
   CARD_PAPER,
   CARD_FONT,
@@ -26,12 +31,24 @@ export {
   CARD_FILE_PREFIX
 } from './config'
 
-export { pickCardTheme, findTemplate } from './theme'
+export { pickCardTheme, findMascot, styleSpaceSize } from './theme'
+
+export {
+  createRng,
+  normalizeSeed,
+  encodeSeed,
+  decodeSeed,
+  randomSeed,
+  nextSeed,
+  buildArtwork
+} from './random'
+
+export { scanText, sanitizeText, scanAll, MAX_TEXT_LEN } from './safety'
 
 export {
   createState,
   normalizeState,
-  selectTemplate,
+  reroll,
   selectPreset,
   loadState,
   saveState,
@@ -49,6 +66,20 @@ export {
   drawDeer,
   drawTree
 } from './motifs'
+
+export {
+  drawMascot,
+  drawSnowman,
+  drawPenguin,
+  drawGingerbread,
+  drawBear,
+  drawGift,
+  drawBell,
+  drawSock,
+  drawWreath,
+  drawStarPet,
+  MASCOT_SCALE
+} from './mascots'
 
 export { drawCard } from './render'
 

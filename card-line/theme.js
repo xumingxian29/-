@@ -21,9 +21,16 @@ export function pickCardTheme(theme) {
   return { theme: fallbackTheme, card: fallbackTheme.card, fallback: true }
 }
 
-/** 取某个模板，找不到就回第一个，绝不返回 undefined */
-export function findTemplate(card, templateId) {
-  const list = (card && card.templates) || []
+/** 取某个角色配置，找不到返回 null（不能回退到第一个，否则会画错风格） */
+export function findMascot(card, mascotId) {
+  const list = (card && card.mascots) || []
   if (!list.length) return null
-  return list.find((t) => t.id === templateId) || list[0]
+  return list.find((m) => m.id === mascotId) || null
+}
+
+/** 配色数量与角色数量：随机空间大小，给页面做"能抽多少张"的提示 */
+export function styleSpaceSize(card) {
+  const p = ((card && card.palettes) || []).length
+  const m = ((card && card.mascots) || []).length
+  return p * m
 }

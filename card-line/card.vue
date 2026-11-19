@@ -14,25 +14,23 @@
       >{{ i + 1 }} {{ s }}</text>
     </view>
 
+    <!-- 第一步：随机造型。不再让用户挑模板，直接抽一张，不喜欢就换 -->
     <view class="sec">
       <view class="sec__hd">
-        <text class="sec__title">{{ card.copy.tplHeading }}</text>
-        <text class="sec__hint">{{ card.copy.tplHint }}</text>
+        <text class="sec__title">{{ card.copy.artHeading }}</text>
+        <text class="sec__hint">{{ card.copy.artHint }}</text>
       </view>
-      <view class="tpls">
-        <view
-          v-for="t in card.templates"
-          :key="t.id"
-          class="tpl"
-          :class="{ 'tpl--on': t.id === state.templateId }"
-          @click="onPickTpl(t.id)"
-        >
-          <view class="tpl__art" :style="{ background: 'linear-gradient(160deg,' + t.bg[0] + ',' + t.bg[1] + ')' }">
-            <view class="tpl__ring" :style="{ borderColor: t.accent }"></view>
-          </view>
-          <text class="tpl__name">{{ t.name }}</text>
+
+      <view class="preview">
+        <image v-if="previewUrl" class="preview__img" :src="previewUrl" mode="widthFix" />
+        <view v-else class="preview__skel">
+          <text class="preview__skel-txt">{{ card.copy.drawingTip }}</text>
         </view>
       </view>
+
+      <button class="reroll" :disabled="drawing || busy" @click="onReroll">
+        {{ drawing ? card.copy.drawingTip : card.copy.rerollCta }}
+      </button>
     </view>
 
     <view class="sec">
@@ -55,8 +53,15 @@
       <text>{{ card.copy.footnote }}</text>
     </view>
 
+    <view class="points">
+      <view v-for="(p, i) in card.copy.points" :key="i" class="point">
+        <text class="point__dot"></text>
+        <text class="point__txt">{{ p }}</text>
+      </view>
+    </view>
+
     <view class="bar">
-      <button class="gen" :disabled="busy" @click="generate">
+      <button class="gen" :disabled="busy || drawing" @click="generate">
         {{ busy ? '生成中…' : card.copy.genCta }}
       </button>
     </view>
@@ -64,36 +69,60 @@
     <view v-if="resultUrl" class="mask" @click="closeResult">
       <view class="result" @click.stop>
         <image class="result__img" :src="resultUrl" mode="widthFix" />
-        <text class="result__tip">{{ card.copy.saveTip }}</text>
+        <text class="result__tip">{{ saveTip }}</text>
         <view class="result__row">
           <button class="rbtn rbtn--ghost" @click="restart">{{ card.copy.againCta }}</button>
           <button class="rbtn rbtn--main" @click="saveImage">{{ card.copy.saveCta }}</button>
         </view>
+        <!-- #ifdef H5 -->
         <button class="rbtn rbtn--link" @click="onShare">{{ card.copy.shareCta }}</button>
+        <!-- #endif -->
+        <!-- #ifndef H5 -->
+        <!-- 小程序里必须用 open-type="share" 才能拉起原生转发面板 -->
+        <button class="rbtn rbtn--link" open-type="share">{{ card.copy.shareCta }}</button>
+        <!-- #endif -->
       </view>
     </view>
+
+    <!-- #ifndef H5 -->
+    <!-- 小程序没有 document.createElement，画布必须是页面里真实存在的节点；
+         放到屏幕外即可，Canvas 2D 不要求可见 -->
+    <canvas
+      :id="canvasId"
+      type="2d"
+      class="card-canvas"
+      :style="canvasStyle"
+    />
+    <!-- #endif -->
   </view>
 </template>
 
 <script setup>
 import { computed, ref } from 'vue'
-import { onLoad, onUnload } from '@dcloudio/uni-app'
+// #ifdef H5
+import { onLoad, onReady, onUnload } from '@dcloudio/uni-app'
+// #endif
+// #ifndef H5
+import { onLoad, onReady, onUnload, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
+// #endif
 import { tokensToVars } from '@/utils/style'
 import { setupShare } from '@/core/jssdk'
 import {
   CARD_CANVAS,
+  CARD_CANVAS_ID,
   CARD_FILE_PREFIX,
   pickCardTheme,
   createState,
   loadState,
   saveState,
-  selectTemplate,
+  reroll,
   selectPreset,
   resolveSelection,
   renderCardBlob,
   downloadBlob,
   releaseUrl,
   isWechatIOS,
+  encodeSeed,
   buildCardShareUrl,
   parseCardEntry,
   shareCard
@@ -106,47 +135,133 @@ const vars = tokensToVars(picked.theme.tokens)
 
 const state = ref(createState(card))
 const step = ref(0)
+/** 生成大图时用；换造型时用 drawing，两者分开，按钮才不会互相卡住 */
 const busy = ref(false)
+const drawing = ref(false)
+const previewUrl = ref('')
+const previewBlob = ref(null)
 const resultUrl = ref('')
 const resultBlob = ref(null)
 
 const stepLabels = computed(() => [
-  card.copy.stepTpl,
+  card.copy.stepArt,
   card.copy.stepWord,
   card.copy.stepGen
 ])
 
+/** 小程序端离屏画布的 id，与 <canvas> 绑定，必须和 config 里保持一致 */
+const canvasId = CARD_CANVAS_ID
+
+/** 画布 CSS 尺寸与像素尺寸保持 1:1，导出时不用再乘 dpr */
+const canvasStyle = `width:${CARD_CANVAS.width}px;height:${CARD_CANVAS.height}px;`
+
+/** 保存提示两端不一样：H5 只能长按，小程序有真正的保存按钮 */
+const saveTip = computed(() => {
+  // #ifdef H5
+  return card.copy.saveTip
+  // #endif
+  // #ifndef H5
+  return card.copy.saveTipMp || card.copy.saveTip
+  // #endif
+})
+
+// #ifndef H5
+// 小程序转发：path 已经是 '/pages/card/card?s=xxx'（buildUrl 的非 H5 分支）
+onShareAppMessage(() => ({
+  title: card.copy.title,
+  path: buildCardShareUrl({ seed: state.value.seed }),
+  imageUrl: resultUrl.value || previewUrl.value || ''
+}))
+
+onShareTimeline(() => ({
+  title: card.copy.title,
+  query: 's=' + encodeSeed(state.value.seed),
+  imageUrl: resultUrl.value || previewUrl.value || ''
+}))
+// #endif
+
 onLoad((options) => {
   const entry = parseCardEntry(options || {})
   let next = loadState(card)
-  if (entry.tpl) next = selectTemplate(next, card, entry.tpl)
+  // 分享链接里带了 seed 就用它 —— 朋友点开看到的是同一张
+  if (entry.seed) next = { ...next, seed: entry.seed }
   state.value = next
   saveState(next)
   syncShare()
 })
 
+/**
+ * 首屏就要出图，所以放在 onReady：
+ * 小程序端 selectQuery 必须等节点渲染完才能拿到 canvas
+ */
+onReady(() => {
+  renderPreview()
+})
+
 onUnload(() => {
+  releaseUrl(previewUrl.value)
   releaseUrl(resultUrl.value)
 })
 
-function onPickTpl(id) {
-  state.value = selectTemplate(state.value, card, id)
+/**
+ * 画一张预览
+ *
+ * 为什么预览也走完整的 750×1000 渲染，而不是画个小图：
+ * 所见即所得。小图和大图两套排版，迟早会不一致。
+ */
+let previewToken = 0
+async function renderPreview() {
+  const token = ++previewToken
+  drawing.value = true
+  try {
+    const { template, wish } = resolveSelection(state.value, card)
+    const res = await renderCardBlob({
+      width: CARD_CANVAS.width,
+      height: CARD_CANVAS.height,
+      template,
+      wish,
+      copy: card.copy,
+      paperStyle: card.paper
+    })
+
+    // 连点"换一张"时，只认最后一次的结果，否则会出现"点了三下停在第二张"
+    if (token !== previewToken) {
+      releaseUrl(res.url)
+      return
+    }
+    releaseUrl(previewUrl.value)
+    previewUrl.value = res.url
+    previewBlob.value = res.blob
+    step.value = Math.max(step.value, 1)
+  } catch (e) {
+    if (token === previewToken) {
+      uni.showToast({ title: card.copy.drawFail, icon: 'none' })
+    }
+  } finally {
+    if (token === previewToken) drawing.value = false
+  }
+}
+
+function onReroll() {
+  if (drawing.value || busy.value) return
+  state.value = reroll(state.value)
   saveState(state.value)
-  step.value = Math.max(step.value, 1)
+  renderPreview()
 }
 
 function onPickPreset(i) {
   state.value = selectPreset(state.value, card, i)
   saveState(state.value)
   step.value = Math.max(step.value, 2)
+  // 祝福语印在图上，换了就必须重画，否则"预览"和"成图"说的不是一件事
+  renderPreview()
 }
 
 async function generate() {
-  if (busy.value) return
+  if (busy.value || drawing.value) return
   busy.value = true
   try {
     const { template, wish } = resolveSelection(state.value, card)
-    if (!template) throw new Error('模板配置缺失')
 
     const res = await renderCardBlob({
       width: CARD_CANVAS.width,
@@ -168,19 +283,22 @@ async function generate() {
   }
 }
 
-function saveImage() {
+async function saveImage() {
   if (!resultBlob.value) return
+  // #ifdef H5
   // 微信 + iOS 的 a[download] 基本无效，直接引导长按，避免"点了没反应"
   if (isWechatIOS()) {
     uni.showToast({ title: card.copy.saveUnsupported, icon: 'none' })
     return
   }
-  const ok = downloadBlob(resultBlob.value, `${CARD_FILE_PREFIX}-${state.value.templateId}.png`)
-  uni.showToast({ title: ok ? card.copy.savedTip : card.copy.saveUnsupported, icon: 'none' })
+  // #endif
+  // 小程序端 downloadBlob 是异步的（要等系统写相册），必须 await 才能拿到真实结果
+  const ok = await downloadBlob(resultBlob.value, `${CARD_FILE_PREFIX}-${encodeSeed(state.value.seed)}.png`)
+  uni.showToast({ title: ok ? card.copy.savedTip : card.copy.saveFail, icon: 'none' })
 }
 
 async function onShare() {
-  const url = buildCardShareUrl({ templateId: state.value.templateId })
+  const url = buildCardShareUrl({ seed: state.value.seed })
   const r = await shareCard({ url, title: card.copy.title, text: card.copy.sub })
   if (r === 'copied') {
     uni.showToast({ title: card.copy.shareCopied, icon: 'none' })
@@ -205,7 +323,7 @@ function syncShare() {
   setupShare({
     title: card.copy.title,
     desc: card.copy.sub,
-    link: buildCardShareUrl({ templateId: state.value.templateId }),
+    link: buildCardShareUrl({ seed: state.value.seed }),
     imgUrl: ''
   })
   // #endif
@@ -225,6 +343,8 @@ function syncShare() {
 
 .hd {
   padding: 16px 20px 10px;
+  /* 页面隐藏了系统导航栏（navigationStyle: custom），刘海屏要自己让出安全区 */
+  padding-top: calc(16px + env(safe-area-inset-top));
 }
 .hd__title {
   display: block;
@@ -275,45 +395,50 @@ function syncShare() {
   color: var(--ft-text-sub);
 }
 
-.tpls {
-  /* 用 grid 严格三等分：flex 在父级宽度异常时会被内容撑开，grid 的 1fr 不会 */
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
+/* 预览：给一张真图，所见即所得 */
+.preview {
   width: 100%;
-  box-sizing: border-box;
-}
-.tpl {
-  width: auto;
-  min-width: 0;
-  box-sizing: border-box;
+  max-width: 214px;
+  margin: 0 auto;
   border-radius: 14px;
   overflow: hidden;
-  border: 2px solid transparent;
   background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-sizing: border-box;
 }
-.tpl--on {
-  border-color: var(--ft-accent);
+.preview__img {
+  width: 100%;
+  display: block;
 }
-.tpl__art {
-  height: 88px;
+.preview__skel {
+  height: 250px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
-.tpl__ring {
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  border: 2px solid #fff;
-  opacity: 0.85;
-}
-.tpl__name {
-  display: block;
-  text-align: center;
+.preview__skel-txt {
   font-size: 12px;
-  padding: 7px 0;
+  color: var(--ft-text-sub);
+}
+
+.reroll {
+  width: 100%;
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.07);
   color: var(--ft-text);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+/* uni 的 button 会用一个 ::after 画边框，不去掉会在按钮外圈留一条线 */
+.reroll::after {
+  border: none;
+}
+.reroll[disabled] {
+  opacity: 0.5;
 }
 
 .words {
@@ -343,6 +468,32 @@ function syncShare() {
   color: var(--ft-text-sub);
 }
 
+.points {
+  padding: 14px 20px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.point {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.point__dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ft-accent);
+  margin-top: 6px;
+  flex: 0 0 auto;
+}
+.point__txt {
+  flex: 1;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ft-text-sub);
+}
+
 .bar {
   position: fixed;
   left: 0;
@@ -364,6 +515,9 @@ function syncShare() {
 }
 .gen[disabled] {
   opacity: 0.6;
+}
+.gen::after {
+  border: none;
 }
 
 .mask {
@@ -413,6 +567,9 @@ function syncShare() {
   font-weight: 600;
   line-height: 1.4;
 }
+.rbtn::after {
+  border: none;
+}
 .rbtn--ghost {
   background: #EFE9DF;
   color: #5A4F42;
@@ -427,5 +584,14 @@ function syncShare() {
   color: #8A7F72;
   font-weight: 400;
   font-size: 13px;
+}
+
+/* 小程序离屏画布：推到屏幕外，不参与布局、不吃点击 */
+.card-canvas {
+  position: fixed;
+  left: -2000px;
+  top: 0;
+  pointer-events: none;
+  z-index: -1;
 }
 </style>

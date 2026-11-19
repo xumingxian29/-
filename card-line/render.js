@@ -8,17 +8,26 @@
 
 import { computeLayout, paperBox, DECO_POINTS } from './layout'
 import { fitText, fontString } from './text'
-import { drawMotif } from './motifs'
+import { drawMotif, drawStar } from './motifs'
 import { CARD_CANVAS, CARD_TEXT, CARD_PAPER } from './config'
 
 /**
- * 卡片上的固定白字层：叠在渐变背景上，不随模板变，故不进 theme。
- * 其余颜色（背景 / 图形 / 装饰 / 白卡）全部来自 theme.card.templates[i]。
+ * 卡片上的文字色兜底值：只有老模板（没带 text 字段）才会用到。
+ * 随机造型会按背景明度给一套，浅背景上这套白字会直接看不见。
  */
 const CARD_INK = {
   tag: 'rgba(255, 255, 255, 0.78)',
   title: '#FFFFFF',
   footer: 'rgba(255, 255, 255, 0.60)'
+}
+
+function inkOf(template) {
+  const t = template.text || {}
+  return {
+    tag: t.tag || CARD_INK.tag,
+    title: t.title || CARD_INK.title,
+    footer: t.footer || CARD_INK.footer
+  }
 }
 
 function drawBackground(ctx, width, height, template) {
@@ -29,32 +38,69 @@ function drawBackground(ctx, width, height, template) {
   ctx.fillRect(0, 0, width, height)
 }
 
+/**
+ * 单颗装饰粒子。位置是比例坐标，形状由 seed 决定 ——
+ * 随机造型下用它，固定模板下退回 DECO_POINTS 的圆点。
+ */
+function drawParticle(ctx, p, width, height, color) {
+  const x = p.x * width
+  const y = p.y * height
+  ctx.save()
+  ctx.globalAlpha = p.alpha == null ? 0.8 : p.alpha
+
+  if (p.kind === 'star') {
+    drawStar(ctx, x, y, p.r * 1.7, color)
+  } else if (p.kind === 'snow') {
+    ctx.strokeStyle = color
+    ctx.lineWidth = 1.7
+    ctx.lineCap = 'round'
+    const arm = p.r * 1.7
+    for (let i = 0; i < 3; i++) {
+      const a = (Math.PI / 3) * i
+      ctx.beginPath()
+      ctx.moveTo(x + Math.cos(a) * arm, y + Math.sin(a) * arm)
+      ctx.lineTo(x - Math.cos(a) * arm, y - Math.sin(a) * arm)
+      ctx.stroke()
+    }
+  } else {
+    ctx.fillStyle = color
+    ctx.beginPath()
+    ctx.arc(x, y, p.r, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.restore()
+}
+
 /** 装饰点用小圆点，不用字符 —— 字符受字体影响，圆点不会 */
 function drawDeco(ctx, width, height, template) {
   ctx.save()
   ctx.fillStyle = template.deco
-  DECO_POINTS.forEach(([px, py], i) => {
-    const x = px * width
-    const y = py * height
-    ctx.beginPath()
-    ctx.arc(x, y, i % 3 === 0 ? 4.5 : 3, 0, Math.PI * 2)
-    ctx.fill()
-  })
+
+  if (template.particles && template.particles.length) {
+    template.particles.forEach((p) => drawParticle(ctx, p, width, height, template.deco))
+  } else {
+    DECO_POINTS.forEach(([px, py], i) => {
+      ctx.beginPath()
+      ctx.arc(px * width, py * height, i % 3 === 0 ? 4.5 : 3, 0, Math.PI * 2)
+      ctx.fill()
+    })
+  }
+
   ctx.restore()
 }
 
-function drawHeadline(ctx, L, template, copy) {
+function drawHeadline(ctx, L, template, copy, ink) {
   ctx.save()
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
 
   // 模板名小标签
-  ctx.fillStyle = CARD_INK.tag
+  ctx.fillStyle = ink.tag
   ctx.font = fontString(L.tag.size, 600)
   ctx.fillText(`· ${template.tag || template.name} ·`, L.tag.x, L.tag.y)
 
   // 主标题
-  ctx.fillStyle = CARD_INK.title
+  ctx.fillStyle = ink.title
   ctx.font = fontString(L.title.size, 800)
   ctx.fillText(copy.heroTitle || '圣诞快乐', L.title.x, L.title.y)
 
@@ -79,9 +125,12 @@ function drawWishPaper(ctx, L, spec) {
   const contentH = fitted.lines.length * fitted.lineHeight + CARD_PAPER.padV * 2
   const box = paperBox(L, contentH)
 
-  // 白色圆角卡
+  // 白色圆角卡。带一点投影：浅色背景上白卡和白底会糊在一起，边界全靠这个阴影
   const r = Math.min(paper.radius || 28, box.h / 2, box.w / 2)
   ctx.save()
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.20)'
+  ctx.shadowBlur = 26
+  ctx.shadowOffsetY = 10
   ctx.beginPath()
   ctx.moveTo(box.x + r, box.y)
   ctx.lineTo(box.x + box.w - r, box.y)
@@ -126,6 +175,7 @@ export function drawCard(ctx, spec = {}) {
     throw new TypeError('drawCard 需要 spec.template（含 bg 渐变两色）')
   }
   const copy = spec.copy || {}
+  const ink = inkOf(template)
   const L = computeLayout(width, height)
 
   drawBackground(ctx, width, height, template)
@@ -133,16 +183,19 @@ export function drawCard(ctx, spec = {}) {
   drawMotif(ctx, template.motif, L.motif.cx, L.motif.cy, L.motif.r, {
     ink: template.ink,
     accent: template.accent,
+    accent2: template.accent2,
+    white: template.white,
+    blush: template.blush,
     nose: template.nose
   })
-  drawHeadline(ctx, L, template, copy)
+  drawHeadline(ctx, L, template, copy, ink)
   const paperInfo = drawWishPaper(ctx, L, spec)
 
   // 落款
   ctx.save()
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  ctx.fillStyle = CARD_INK.footer
+  ctx.fillStyle = ink.footer
   ctx.font = fontString(L.footer.size, 400)
   ctx.fillText(copy.footer || '', L.footer.x, L.footer.y)
   ctx.restore()

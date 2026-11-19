@@ -9,6 +9,8 @@
  * 椭圆一律用 arc + scale 实现，不用 ellipse()（老内核兼容性更好）。
  */
 
+import { drawMascot } from './mascots'
+
 function ellipse(ctx, x, y, rx, ry, rotation = 0) {
   ctx.save()
   ctx.translate(x, y)
@@ -221,6 +223,10 @@ export function drawTree(ctx, cx, cy, s, opt = {}) {
 
 /**
  * 统一调度：按 template.motif 画对应图形
+ *
+ * 老的三套（雪花 / 麋鹿 / 树）留在这里，保证旧链接与旧主题仍然能画；
+ * 新增的可爱角色全部在块 5（mascots.js），本文件只负责转发。
+ *
  * @param {number} r 视觉半径基准（约为画布短边 15%）
  */
 export function drawMotif(ctx, motif, cx, cy, r, opt = {}) {
@@ -236,6 +242,8 @@ export function drawMotif(ctx, motif, cx, cy, r, opt = {}) {
     drawTree(ctx, cx, cy, r * 1.1, opt)
     return
   }
+  // 可爱角色：交给块 5 的调度器，命中就结束
+  if (drawMascot(ctx, motif, cx, cy, r * 1.2, opt)) return
   // 未知 motif 兜底：画个星，不留白
   drawStar(ctx, cx, cy, r * 0.8, opt.accent || '#FFFFFF')
 }

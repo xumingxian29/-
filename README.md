@@ -33,7 +33,7 @@
 | 15 | 分享参数块 | `share-params/` | 两端进入参数与分享链接统一编解码，外加 JS-SDK 分享卡片 |
 | 16 | 云函数块 | `cloud-function/` | 单入口 action 路由 + 会话签发 + 频控 + 内容安全，两端共用 |
 | 17 | 渲染组件块 | `view-components/` | 舞台 / 头像挂件 / 挂树面板 / 海报弹窗，外加 `style.js`（tokens → CSS 变量）|
-| 18 | 贺卡线块 | `card-line/` | 单人贺卡：选模板 → 选祝福 → 出图，零上传零账号；内部再分 11 个小块 + 页面 |
+| 18 | 贺卡线块 | `card-line/` | 单人贺卡：随机造型 → 选祝福 → 出图，零上传零账号；内部再分 15 个小块 + 页面 |
 
 ## 三条架构铁律
 
@@ -68,7 +68,7 @@
 | 15 | `src/core/share.js` + `jssdk.js` |
 | 16 | `cloudfunctions/tree/`（含 `lib/` 9 个文件、`actions/` 7 个文件、`config.json`、`package.json`）|
 | 17 | `src/components/` + `src/utils/style.js` |
-| 18 | `src/card/`（11 个文件）+ `src/pages/card/card.vue` |
+| 18 | `src/card/`（15 个文件）+ `src/pages/card/card.vue` |
 
 完整的「文件 → 目标路径」映射在 `manifest.json` 里，`npm run verify` 就是照着它校验的。
 
@@ -85,7 +85,7 @@
 ```bash
 npm run verify      # 映射完整性 + 每条 import 在目标位置能否解析 + 前后端 limits 对拍
 npm test            # 22 项纯逻辑：存储容错、会话读写、分享链接、海报折行
-npm run test:card   # 45 项贺卡线：折行、避头点、降字号、版面不撞、三图形、脏数据、分享
+npm run test:card   # 74 项贺卡线：折行、避头点、降字号、版面不撞、随机确定性、角色覆盖、内容安全、分享
 npm run test:cloud  # 29 项端到端：假数据库跑 register → joinTree → blessNode → listNodes
 npm run check       # 四个一起跑
 ```
@@ -104,14 +104,14 @@ npm run check       # 四个一起跑
 - 条件编译生效：H5 产物中 `wx.cloud` 出现 0 次，本地实现与内联 SVG 头像正常保留
 - 云函数块 29 项端到端全过（详情见 `CHANGELOG.md`）：会话验签、并发祝福只计一次、跨口径排序、IP 频控
 - 纯逻辑 22 项全过：坏数据自愈、分享链接保留 `sharecode` 且剔除旧 `inviter`、长文本折行截断
-- 贺卡线 45 项全过：折行不出「每字一行」、标点不落行首、长祝福自动降字号不撞版面、三套模板可绘制、脏数据收敛到默认值
-- 全部 61 个块文件的 import 在目标路径下可解析（`npm run verify`，113 条导入 0 未解析）
+- 贺卡线 74 项全过：折行不出「每字一行」、标点不落行首、长祝福自动降字号不撞版面、同 seed 必出同一张图、11 个角色全部可绘制、文案零越界
+- 全部 65 个块文件的 import 在目标路径下可解析（`npm run verify`，123 条导入 0 未解析）
 
 > 注：2026-11 这批修复之后**没有**再跑过 uni-app 双端编译（本仓库没有构建工程）。
 > `platform-switch` 与 `poster-render` 的出口文件改动过写法，重新放回工程后建议先 `npm run build:h5` 验一次。
-> 贺卡线在源工程里跑过 `build:h5` 并用真机视口截图验证过（选择页 / 生成结果 / 三套模板渲染）。
+> 贺卡线在源工程里跑过 `build:h5` 与 `build:mp-weixin`，并用真机视口截图验证过（随机预览 / 换一张 / 生成结果 / 11 个角色逐一渲染）。
 
-## 十六个真踩过的坑
+## 十九个真踩过的坑
 
 1. `project.config.json` 会被 uni-app 编译覆盖 —— 用 `project.prod.config.json` 另存，别直接改产物。
 2. canvas 实例进 reactive 后被 Vue3 代理，`canvasToTempFilePath` 拿到 undefined，且不报错。
@@ -129,6 +129,9 @@ npm run check       # 四个一起跑
 14. **`ctx.font = 26` 不报错，但也不生效**：裸数字不是合法 CSS font，浏览器直接忽略，`measureText` 沿用上一个字号 —— 画出来是**每个字单独一行**。必须用完整简写 `600 34px sans-serif`。
 15. **canvas 画 emoji 等于把渲染交给系统字体**：安卓微信常出黑白或方块，同一份代码在不同机型长得不一样。主视觉一律矢量路径。
 16. **`flex: 1` 三等分在父级宽度异常时会被内容撑开**：三个模板卡片会挤出视口，且看起来像"样式没生效"。改用 `grid-template-columns: repeat(3, minmax(0, 1fr))`。
+17. **浅背景 + 白字 = 什么都没有**：早期三套模板都是深色，标题写死白色没问题；加了浅色配色后白标题直接消失在背景里。文字色必须跟背景明度走。
+18. **随机构图里混进 `Math.random()` 就毁掉分享**：同一颗 seed 画不出同一张图，朋友点开看到的是另一张。构图只走确定性 PRNG，`Math.random` 只允许出现在"取新 seed"那一行。
+19. **正则里别用后行断言**：`(?<!\d)` 在 iOS 16.4 之前的内核直接抛 SyntaxError，一个校验规则能把整个模块带崩。改成捕获边界。
 
 ## 声明
 

@@ -9,7 +9,7 @@
  * 零依赖，不需要 esbuild / vite / 任何构建工具。
  *
  * 覆盖：字体拼装、折行（防"每字一行"）、避头点、自动降字号、
- *       版面不重叠、三模板可绘制、脏数据收敛、主题回退。
+ *       版面不重叠、随机确定性、角色覆盖、脏数据收敛、内容安全、主题回退、分享参数。
  */
 
 import fs from 'node:fs'
@@ -73,14 +73,14 @@ globalThis.uni = {
 
 const load = (name) => import(pathToFileURL(path.join(VFS, 'src/card', name)).href)
 
-const {
-  drawCard
-} = await load('render.js')
+const { drawCard } = await load('render.js')
 const { wrapText, fitText, fontString } = await load('text.js')
 const { computeLayout, validateLayout, paperBox } = await load('layout.js')
-const { normalizeState, createState, resolveSelection } = await load('state.js')
+const { normalizeState, createState, resolveSelection, reroll } = await load('state.js')
 const { pickCardTheme } = await load('theme.js')
 const { drawMotif } = await load('motifs.js')
+const { buildArtwork, createRng, encodeSeed, decodeSeed, normalizeSeed } = await load('random.js')
+const { scanText, sanitizeText, scanAll } = await load('safety.js')
 const { buildCardShareUrl, parseCardEntry } = await load('share.js')
 
 /* ---------- 3. mock canvas ctx ---------- */
@@ -98,7 +98,6 @@ function makeCtx() {
   const grad = { addColorStop: () => {} }
   const noop = (name) => (...args) => calls.push([name, args.length])
   const holder = { value: '16px sans-serif' }
-
   const ctx = {
     calls,
     fillStyle: '',
@@ -106,6 +105,10 @@ function makeCtx() {
     lineWidth: 1,
     lineCap: 'butt',
     lineJoin: 'miter',
+    globalAlpha: 1,
+    shadowColor: '',
+    shadowBlur: 0,
+    shadowOffsetY: 0,
     textAlign: 'start',
     textBaseline: 'alphabetic',
     save: noop('save'),
@@ -125,7 +128,7 @@ function makeCtx() {
     stroke: noop('stroke'),
     fillRect: noop('fillRect'),
     clearRect: noop('clearRect'),
-    fillText: (t) => calls.push(['fillText', t]),
+    fillText: (t) => calls.push(['fillText', t, ctx.fillStyle]),
     createLinearGradient: () => grad,
     createRadialGradient: () => grad,
     // 宽度 ≈ 字数 × 字号：近似但足以判定折行
@@ -221,15 +224,46 @@ ok(validateLayout(L2).length === 0, '换尺寸 1080×1440 仍无重叠')
 ok(paperBox(L, 99999).h <= L.paper.maxH, '白卡高度受 maxH 约束')
 ok(Math.abs(paperBox(L, 120).h - 120) < 0.001, '矮内容按实际高度')
 
-/* ---------- 绘制 ---------- */
-console.log('\n[6] 绘制全链路')
+/* ---------- 随机造型 ---------- */
+console.log('\n[6] 随机造型：确定性')
 const { card } = pickCardTheme()
-const template = card.templates[0]
+const SEED = 20261225
+const artA = buildArtwork(SEED, card)
+const artB = buildArtwork(SEED, card)
+ok(JSON.stringify(artA) === JSON.stringify(artB), '同一颗 seed 两次生成完全一致')
+ok(Array.isArray(artA.bg) && artA.bg.length === 2, '画稿带背景渐变两色')
+ok(!!artA.motif && !!artA.tag, '画稿带 motif 与标签')
+
+let toneOk = true
+for (let i = 0; i < 200; i++) {
+  const a = buildArtwork(1000 + i * 7919, card)
+  const p = card.palettes.find((x) => x.id === a.paletteId)
+  const m = card.mascots.find((x) => x.id === a.motif)
+  if (!p || !m || (m.fit !== 'any' && m.fit !== p.bgTone)) {
+    toneOk = false
+    break
+  }
+}
+ok(toneOk, '200 次抽样：角色明度始终匹配背景')
+
+const seen = new Set()
+for (let i = 0; i < 40; i++) seen.add(buildArtwork(100 + i * 104729, card).id)
+ok(seen.size >= 15, '40 次生成至少 15 种不同画面', `实际 ${seen.size}`)
+
+ok(reroll({ seed: SEED, presetIndex: 0 }).seed !== SEED, '换一张会换 seed')
+ok(decodeSeed(encodeSeed(SEED)) === SEED, 'seed 编解码可往返')
+ok(decodeSeed('') === null && decodeSeed('不合法') === null && decodeSeed('zzzzzzzz') === null, '非法短码一律返回 null')
+ok(normalizeSeed(-5) > 0 && normalizeSeed(0) > 0, '非法 seed 收敛成正数')
+ok(createRng(1)() === createRng(1)(), 'PRNG 同 seed 同首值')
+
+/* ---------- 绘制 ---------- */
+console.log('\n[7] 绘制全链路')
+const art = buildArtwork(SEED, card)
 const ctx2 = makeCtx()
 const info = drawCard(ctx2, {
   width: 750,
   height: 1000,
-  template,
+  template: art,
   wish: '圣诞快乐，平安喜乐',
   copy: card.copy,
   paperStyle: card.paper
@@ -241,15 +275,16 @@ ok(names.includes('fill'), '图形已填充')
 ok(texts.includes(card.copy.heroTitle), '主标题正确')
 ok(texts.includes('圣诞快乐，平安喜乐'), '祝福语正确')
 ok(texts.includes(card.copy.footer), '落款正确')
+ok(texts.includes(`· ${art.tag} ·`), '角色标签正确')
 ok(info.lines.length === 1, '短祝福一行')
 ok(info.box.h < L.paper.maxH, '短祝福白卡不会顶满')
 
-console.log('\n[7] 长祝福语不撞版面')
+console.log('\n[8] 长祝福语不撞版面')
 const ctx3 = makeCtx()
 const info3 = drawCard(ctx3, {
   width: 750,
   height: 1000,
-  template,
+  template: art,
   wish: LONG,
   copy: card.copy,
   paperStyle: card.paper
@@ -259,45 +294,115 @@ ok(info3.box.h <= L.paper.maxH + 0.001, '白卡不超高')
 ok(info3.box.y >= L.title.y, '白卡顶部不低于标题', `${info3.box.y.toFixed(0)} vs ${L.title.y}`)
 ok(info3.box.y + info3.box.h <= L.footer.y - L.footer.size, '白卡底部不压落款')
 
-/* ---------- 三种图形 ---------- */
-console.log('\n[8] 三种 motif')
-card.templates.forEach((t) => {
+/* ---------- 文字色 ---------- */
+console.log('\n[9] 文字色跟着背景明度走')
+let lightArt = null
+let darkArt = null
+for (let i = 0; i < 300 && (!lightArt || !darkArt); i++) {
+  const a = buildArtwork(500 + i * 3571, card)
+  if (a.bgTone === 'light' && !lightArt) lightArt = a
+  if (a.bgTone === 'dark' && !darkArt) darkArt = a
+}
+ok(!!lightArt && !!darkArt, '抽样中深浅背景都能出现')
+ok(lightArt.text.title === card.text.onLight.title, '浅背景用深色标题')
+ok(darkArt.text.title === card.text.onDark.title, '深背景用白色标题')
+
+const ctxL = makeCtx()
+drawCard(ctxL, { width: 750, height: 1000, template: lightArt, wish: '圣诞快乐', copy: card.copy, paperStyle: card.paper })
+const heroCall = ctxL.calls.find((c) => c[0] === 'fillText' && c[1] === card.copy.heroTitle)
+ok(heroCall && heroCall[2] === card.text.onLight.title, '浅背景标题真的用了深色', heroCall && heroCall[2])
+
+let textGap = 0
+card.palettes.forEach((p) => {
+  if (!card.text[p.bgTone === 'dark' ? 'onDark' : 'onLight']) textGap++
+})
+ok(textGap === 0, `${card.palettes.length} 套配色都有对应文字色`)
+
+/* ---------- 角色覆盖 ---------- */
+console.log('\n[10] 角色绘制覆盖')
+const missing = []
+card.mascots.forEach((m) => {
   const c = makeCtx()
   let drawn = true
   try {
-    drawMotif(c, t.motif, 375, 370, 108, { ink: t.ink, accent: t.accent, nose: t.nose })
+    drawMotif(c, m.id, 375, 370, 108, art)
   } catch (e) {
     drawn = false
   }
-  ok(drawn && c.calls.some((x) => x[0] === 'fill' || x[0] === 'stroke'), `${t.name}（${t.motif}）可绘制`)
+  if (!drawn || !c.calls.some((x) => x[0] === 'fill' || x[0] === 'stroke')) missing.push(m.id)
 })
+ok(missing.length === 0, `全部 ${card.mascots.length} 个角色都能画出内容`, missing.join(','))
+
+let comboFail = 0
+card.palettes.forEach((p) => {
+  card.mascots.forEach((m) => {
+    const c = makeCtx()
+    try {
+      drawMotif(c, m.id, 375, 370, 108, p)
+    } catch (e) {
+      comboFail++
+    }
+  })
+})
+ok(comboFail === 0, `${card.palettes.length} 套配色 × ${card.mascots.length} 个角色全部可绘制`)
+
+const cu = makeCtx()
+drawMotif(cu, 'not-exist', 375, 370, 108, art)
+ok(cu.calls.some((x) => x[0] === 'fill'), '未知 motif 兜底画星，不留白')
 
 /* ---------- 状态收敛 ---------- */
-console.log('\n[9] 脏数据收敛')
-const base = createState(card)
-ok(base.templateId === card.templates[0].id, '默认取第一个模板')
+console.log('\n[11] 脏数据收敛')
+const base = createState(card, SEED)
+ok(base.seed === SEED, '可传入种子开局（分享入口需要确定性）')
 ok(base.presetIndex === 0, '默认第一句祝福')
 
-const dirty = normalizeState(card, { templateId: 'not-exist', presetIndex: 999 })
-ok(dirty.templateId === card.templates[0].id, '未知模板回退')
+const dirty = normalizeState(card, { seed: 'abc', presetIndex: 999 })
+ok(Number.isFinite(dirty.seed) && dirty.seed > 0, '坏 seed 收敛成合法种子')
 ok(dirty.presetIndex === 0, '越界索引回退')
 
-const dirty2 = normalizeState(card, { templateId: card.templates[1].id, presetIndex: '2' })
-ok(dirty2.templateId === card.templates[1].id, '合法模板保留')
+const dirty2 = normalizeState(card, { seed: SEED, presetIndex: '2' })
+ok(dirty2.seed === SEED, '合法 seed 保留')
 ok(dirty2.presetIndex === 2, '数字字符串索引被接受')
 
 const sel = resolveSelection(dirty2, card)
-ok(!!sel.template && sel.template.id === card.templates[1].id, '选中模板可解析')
+ok(!!sel.template && sel.template.seed === SEED, '选中画稿可解析')
 ok(sel.wish === card.presets[2], '选中祝福可解析')
+ok(sel.template === sel.art, 'template 与 art 是同一对象')
+
+/* ---------- 内容安全 ---------- */
+console.log('\n[12] 内容安全')
+const copyTexts = [
+  card.copy.title,
+  card.copy.sub,
+  card.copy.heroTitle,
+  card.copy.footer,
+  card.copy.footnote,
+  ...card.copy.points,
+  ...card.presets,
+  ...card.mascots.map((m) => m.tag),
+  ...card.mascots.map((m) => m.name)
+]
+const allSafe = scanAll(copyTexts)
+ok(allSafe.ok, `主题里 ${copyTexts.length} 条文案全部通过扫描`, JSON.stringify(allSafe.bad))
+ok(scanText('圣诞快乐').ok, '普通祝福通过')
+ok(scanText('一路平安').ok, '「一路平安」不被误杀（路不是地名）')
+ok(scanText('北京下雪了').hits.some((h) => h.startsWith('place:')), '具体地名被拦')
+ok(scanText('张先生圣诞快乐').hits.some((h) => h.startsWith('title:')), '敬称被拦（会被读成人名）')
+ok(scanText('\uD83C\uDDE8\uD83C\uDDF3 圣诞快乐').hits.includes('flag'), '国旗符号被拦')
+ok(scanText('打 13800138000').hits.some((h) => h.startsWith('privacy:')), '手机号被拦')
+ok(scanText('a@b.com').hits.some((h) => h.startsWith('privacy:')), '邮箱被拦')
+ok(scanText('一'.repeat(81)).hits.includes('too-long'), '超长文本被拦')
+ok(sanitizeText('张先生圣诞快乐', '圣诞快乐').text === '圣诞快乐', '命中时整段换兜底文案')
 
 /* ---------- 主题回退 ---------- */
-console.log('\n[10] 主题回退')
+console.log('\n[13] 主题回退')
 const fb = pickCardTheme({ id: 'fake', tokens: {} })
 ok(!!fb.card && fb.fallback === true, '缺 card 段时回退 christmas')
-ok(fb.card.templates.length >= 3, '回退后模板可用')
+ok(fb.card.palettes.length >= 4, '回退后配色池可用')
+ok(fb.card.mascots.length >= 6, '回退后角色池可用')
 
 /* ---------- 分享链接 ---------- */
-console.log('\n[11] 分享链接')
+console.log('\n[14] 分享链接')
 globalThis.window = {
   location: {
     origin: 'https://x.example.com',
@@ -306,11 +411,15 @@ globalThis.window = {
     hash: '#/pages/card/card'
   }
 }
-const url = buildCardShareUrl({ templateId: 'deer' })
+const url = buildCardShareUrl({ seed: SEED })
 ok(url.includes('sharecode=ABC123'), '保留 sharecode', url)
-ok(url.includes('#/pages/card/card?tpl=deer'), '带 tpl 参数', url)
-ok(parseCardEntry({}).tpl === '' || typeof parseCardEntry({}).tpl === 'string', '入口解析不抛错')
-ok(parseCardEntry({ tpl: 'snow' }).tpl === 'snow', '显式参数优先')
+ok(url.includes('#/pages/card/card?s=' + encodeSeed(SEED)), '带 seed 参数', url)
+ok(parseCardEntry({ s: encodeSeed(SEED) }).seed === SEED, '显式参数优先且能还原 seed')
+ok(parseCardEntry({ s: '不合法' }).seed === null, '坏参数返回 null 而不是抛错')
+
+// 从 hash 路由里读（朋友点开分享链接走的就是这条路）
+globalThis.window.location.hash = '#/pages/card/card?s=' + encodeSeed(SEED)
+ok(parseCardEntry({}).seed === SEED, '从 location.hash 里读到 seed')
 
 /* ---------- 收尾 ---------- */
 fs.rmSync(VFS, { recursive: true, force: true })

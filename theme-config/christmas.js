@@ -107,13 +107,9 @@ export default {
   },
 
   /**
-   * 贺卡线（18 号块 card-line）
-   *
-   * 与许愿树并列的第二条产品线：单人贺卡，零上传、零键盘、零账号，三步出图。
-   * 与许愿树共用本主题的 tokens 与节日定位，但版式、文案、模板全部自成一套。
-   *
-   * 这里是贺卡视觉的唯一来源：18 号块的绘制层只按这些参数画，
-   * 不允许出现颜色字面量。加一个模板只改 `templates`，页面与 CSS 零改动。
+   * 贺卡线（pages/card）
+   * 与许愿树是两条独立产品线，共用本主题的 tokens / 节日定位。
+   * 视觉参数全部在这里，src/card/* 只负责按这些参数画，不允许出现颜色字面量。
    */
   card: {
     canvas: { width: 750, height: 1000 },
@@ -124,12 +120,15 @@ export default {
     },
     copy: {
       title: '圣诞贺卡',
-      sub: '选个模板、选句祝福，30 秒生成一张存进相册',
-      stepTpl: '选模板',
+      sub: '抽一张可爱画面、选句祝福，30 秒存进相册',
+      stepArt: '随机造型',
       stepWord: '选祝福',
       stepGen: '生成',
-      tplHeading: '选个模板',
-      tplHint: '点一下就换，不用上传任何东西',
+      artHeading: '随机造型',
+      artHint: '点「换一张」抽一张新的，画面全是画出来的',
+      rerollCta: '换一张',
+      drawingTip: '正在画…',
+      drawFail: '没画出来，再试一次',
       wordHeading: '选句祝福',
       wordHint: '都是现成的，一个字都不用打',
       genCta: '生成我的贺卡',
@@ -137,13 +136,19 @@ export default {
       saveCta: '保存图片',
       shareCta: '分享给朋友',
       saveTip: '长按图片即可保存到相册',
+      saveTipMp: '点下面「保存图片」直接存进相册',
       savedTip: '已保存，去相册看看',
       saveUnsupported: '当前浏览器不支持直接下载，请长按图片保存',
       saveFail: '保存失败，请长按图片保存',
       shareCopied: '链接已复制，去粘贴给朋友',
       heroTitle: '圣诞快乐',
       footer: '来自一位朋友的圣诞贺卡 · 2026',
-      footnote: '全程零上传 · 零键盘 · 零账号',
+      footnote: '画面全是几何图形 · 不含任何人名、地名、国旗国徽',
+      points: [
+        '图片在你的手机里生成，不会上传到任何服务器',
+        '不填昵称、不上传头像，图里不会有你的任何信息',
+        '每次换一张都是新的；分享链接会带上这张的编号，朋友点开看到同一张'
+      ],
       backCta: '回到许愿树'
     },
     presets: [
@@ -154,39 +159,153 @@ export default {
       '平安夜，记得吃苹果',
       'Merry Christmas，心想事成'
     ],
-    templates: [
-      {
-        id: 'snow',
-        name: '雪花夜',
-        motif: 'snow',
-        bg: ['#1A2A5E', '#2E4A9E'],
-        ink: '#FFFFFF',
-        accent: '#FFFFFF',
-        deco: 'rgba(255, 255, 255, 0.72)',
-        tag: '雪花夜'
+    /**
+     * 背景上的文字色
+     *
+     * 随机配色里有一半是浅背景，写死白色标题会直接看不见（这条是实测踩到的）。
+     * 所以文字色跟着 bgTone 走：深背景用白字，浅背景用深褐字。
+     * 故意把三档透明度分开配，不靠 rgba 算 —— 主题文件应该是"抄了就能用"的。
+     */
+    text: {
+      onDark: {
+        title: '#FFFFFF',
+        tag: 'rgba(255,255,255,0.80)',
+        footer: 'rgba(255,255,255,0.62)'
       },
-      {
-        id: 'deer',
-        name: '红鼻麋鹿',
-        motif: 'deer',
-        bg: ['#B3282D', '#7A1A1E'],
-        // 深褐到近黑的头，才压得住深红背景；鼻子单独给亮红，不用装饰金
-        ink: '#1F0B06',
-        nose: '#E0353A',
-        accent: '#F2C14E',
-        deco: 'rgba(255, 215, 130, 0.62)',
-        tag: '红鼻麋鹿'
-      },
-      {
-        id: 'tree',
-        name: '圣诞树下',
-        motif: 'tree',
-        bg: ['#14532D', '#1F7A3D'],
-        ink: '#0A3220',
-        accent: '#E8B84B',
-        deco: 'rgba(255, 255, 255, 0.50)',
-        tag: '圣诞树下'
+      onLight: {
+        title: '#2B2118',
+        tag: 'rgba(43,33,24,0.58)',
+        footer: 'rgba(43,33,24,0.45)'
       }
+    },
+
+    /**
+     * 配色池：随机造型的第一维
+     *
+     * bgTone 不是"背景色深浅"的描述，而是给角色选择用的：
+     * light（浅背景）只会抽到深色主体角色，dark（深背景）只会抽到浅色主体角色。
+     * 少了这个字段，白雪人就会画在奶油色背景上，整只消失。
+     */
+    palettes: [
+      {
+        id: 'candy',
+        name: '糖果粉',
+        bgTone: 'light',
+        bg: ['#FBD3E0', '#F2A2BE'],
+        ink: '#5E1B36',
+        white: '#FFFAFC',
+        accent: '#D9385E',
+        accent2: '#F2A03D',
+        blush: 'rgba(206,60,100,0.32)',
+        deco: 'rgba(255,255,255,0.78)'
+      },
+      {
+        id: 'mint',
+        name: '薄荷雪',
+        bgTone: 'light',
+        bg: ['#E4F7EF', '#A9DDC8'],
+        ink: '#1B4C40',
+        white: '#FFFFFF',
+        accent: '#D94F63',
+        accent2: '#E8A33C',
+        blush: 'rgba(200,80,110,0.28)',
+        deco: 'rgba(255,255,255,0.85)'
+      },
+      {
+        id: 'cream',
+        name: '奶油姜饼',
+        bgTone: 'light',
+        bg: ['#FFF3DF', '#F2D6A8'],
+        ink: '#54351F',
+        white: '#FFFBF3',
+        accent: '#C9303A',
+        accent2: '#D99A3C',
+        blush: 'rgba(190,100,70,0.30)',
+        deco: 'rgba(255,255,255,0.72)'
+      },
+      {
+        id: 'frost',
+        name: '霜白清晨',
+        bgTone: 'light',
+        bg: ['#EAF2FB', '#BCD8EF'],
+        ink: '#22415E',
+        white: '#FFFFFF',
+        accent: '#D6455C',
+        accent2: '#E8A33C',
+        blush: 'rgba(190,85,115,0.26)',
+        deco: 'rgba(255,255,255,0.9)'
+      },
+      {
+        id: 'night',
+        name: '午夜蓝',
+        bgTone: 'dark',
+        bg: ['#16204A', '#39467F'],
+        ink: '#161B33',
+        white: '#FFFFFF',
+        accent: '#E24B5C',
+        accent2: '#F2C14E',
+        blush: 'rgba(245,150,165,0.38)',
+        deco: 'rgba(255,255,255,0.74)'
+      },
+      {
+        id: 'pine',
+        name: '松林夜',
+        bgTone: 'dark',
+        bg: ['#0F3D2E', '#1E6B4A'],
+        ink: '#10251C',
+        white: '#FDFCF6',
+        accent: '#E2483F',
+        accent2: '#F0B429',
+        blush: 'rgba(245,150,165,0.36)',
+        deco: 'rgba(255,255,255,0.62)'
+      },
+      {
+        id: 'berry',
+        name: '莓果紫',
+        bgTone: 'dark',
+        bg: ['#2E1B47', '#5C3A80'],
+        ink: '#221331',
+        white: '#FFF9FF',
+        accent: '#E8407A',
+        accent2: '#F5C451',
+        blush: 'rgba(250,150,180,0.40)',
+        deco: 'rgba(255,255,255,0.70)'
+      },
+      {
+        id: 'cocoa',
+        name: '可可棕',
+        bgTone: 'dark',
+        bg: ['#4A2C21', '#7C4B34'],
+        ink: '#2A1712',
+        white: '#FFF6E8',
+        accent: '#E2A03C',
+        accent2: '#F2C14E',
+        blush: 'rgba(245,170,150,0.36)',
+        deco: 'rgba(255,235,200,0.58)'
+      }
+    ],
+
+    /**
+     * 角色池：随机造型的第二维
+     *
+     * fit 决定它能出现在哪种背景上：
+     *   light  深色主体，只能放浅背景
+     *   dark   浅色主体，只能放深背景
+     *   any    深浅都行
+     * tag 是印在卡片上的小标签，只用通用名词，绝不带人名地名。
+     */
+    mascots: [
+      { id: 'snowman', name: '小雪人', tag: '雪地里的小雪人', fit: 'dark' },
+      { id: 'bell', name: '金铃铛', tag: '叮当响的铃铛', fit: 'dark' },
+      { id: 'star', name: '小星星', tag: '会笑的小星星', fit: 'dark' },
+      { id: 'penguin', name: '小企鹅', tag: '戴围巾的小企鹅', fit: 'light' },
+      { id: 'gingerbread', name: '姜饼人', tag: '糖霜姜饼人', fit: 'light' },
+      { id: 'bear', name: '小熊', tag: '戴圣诞帽的小熊', fit: 'light' },
+      { id: 'wreath', name: '圣诞花环', tag: '挂门口的花环', fit: 'light' },
+      { id: 'tree', name: '圣诞树', tag: '亮着灯的圣诞树', fit: 'light' },
+      { id: 'deer', name: '红鼻麋鹿', tag: '红鼻子的麋鹿', fit: 'light' },
+      { id: 'gift', name: '礼物盒', tag: '会笑的礼物盒', fit: 'any' },
+      { id: 'sock', name: '圣诞袜', tag: '装满礼物的袜子', fit: 'any' }
     ]
   },
 

@@ -11,6 +11,12 @@ export const CARD_PATH = '/pages/card/card'
 /** 画布尺寸：3:4，朋友圈与手机竖屏都能完整显示 */
 export const CARD_CANVAS = { width: 750, height: 1000 }
 
+/**
+ * 小程序端离屏画布的节点 id
+ * 页面里必须有对应 <canvas type="2d">，H5 端不需要（走 document.createElement）
+ */
+export const CARD_CANVAS_ID = 'card-canvas'
+
 /** 祝福语排版规则 */
 export const CARD_TEXT = {
   maxLines: 3,
