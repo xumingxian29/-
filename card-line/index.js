@@ -5,8 +5,8 @@
  *   config.js     常量：画布尺寸、排版规则、存储 key
  *   theme.js      从 themes/*.js 的 card 段取配置，缺失自动回退
  *   random.js     确定性随机：seed ↔ 短码、配色×角色×粒子 组合
- *   safety.js     内容安全闸：国旗/地名/敬称/手机号扫描与兜底
- *   text.js       字体串拼装 + 折行 + 自动降字号
+ *   safety.js     内容安全闸：文案命中兜底 + 名字严格裁决（拒绝而非替换）
+ *   text.js       字体串拼装 + 折行 + 自动降字号 + 单行自适应（名字专用）
  *   mascots.js    可爱角色：雪人/企鹅/姜饼人/小熊/礼物/铃铛/袜子/花环
  *   motifs.js     图形调度（含老的雪花/麋鹿/树，保证旧链接仍能画）
  *   layout.js     版面比例计算 + 合法性自检
@@ -25,6 +25,7 @@ export {
   CARD_CANVAS,
   CARD_CANVAS_ID,
   CARD_TEXT,
+  CARD_NAME,
   CARD_PAPER,
   CARD_FONT,
   CARD_STORAGE_KEY,
@@ -44,7 +45,15 @@ export {
   buildArtwork
 } from './random'
 
-export { scanText, sanitizeText, scanAll, MAX_TEXT_LEN } from './safety'
+export {
+  scanText,
+  sanitizeText,
+  sanitizeName,
+  clampName,
+  scanAll,
+  MAX_TEXT_LEN,
+  MAX_NAME_LEN
+} from './safety'
 
 export {
   createState,
@@ -58,7 +67,7 @@ export {
   resolveSelection
 } from './state'
 
-export { fontString, measureWidth, wrapText, fitText } from './text'
+export { fontString, measureWidth, wrapText, fitText, fitLine } from './text'
 
 export { computeLayout, paperBox, validateLayout, DECO_POINTS } from './layout'
 

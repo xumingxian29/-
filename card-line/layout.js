@@ -35,11 +35,17 @@ export function computeLayout(width, height) {
     /** 主图形：中心 + 半径 */
     motif: { cx: W / 2, cy: H * 0.37, r, top: H * 0.37 - r * 1.05, bottom: H * 0.37 + r * 1.05 },
     /** 模板名小标签 */
-    tag: { x: W / 2, y: H * 0.557, size: 27 },
+    tag: { x: W / 2, y: H * 0.52, size: 27 },
     /** 主标题 */
-    title: { x: W / 2, y: H * 0.636, size: 74 },
-    /** 祝福白卡：水平内边距 + 垂直中心 + 最大高度 */
-    paper: { x: W * 0.12, w: W * 0.76, centerY: H * 0.785, maxH: H * 0.246 },
+    title: { x: W / 2, y: H * 0.60, size: 74 },
+    /**
+     * 祝福白卡：水平内边距 + 垂直中心 + 最大高度
+     *
+     * 加了称呼行之后白卡要更高（maxH 0.246 → 0.29），
+     * 标签、标题跟着上移让位。这组数字是联动的，单独改一个就会撞：
+     * 改完请跑 `npm run test:card`，[版面] 那组会把五段两两相撞全验一遍。
+     */
+    paper: { x: W * 0.12, w: W * 0.76, centerY: H * 0.78, maxH: H * 0.29 },
     /** 落款 */
     footer: { x: W / 2, y: H * 0.952, size: 22 }
   }

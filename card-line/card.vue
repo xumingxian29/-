@@ -50,6 +50,48 @@
       </button>
     </view>
 
+    <!-- 第三步：署名。名字只画进图里 —— 不进链接、不落盘，所以两个框都可以空着 -->
+    <view class="sec">
+      <view class="sec__hd">
+        <text class="sec__title">{{ card.copy.nameHeading }}</text>
+        <text class="sec__hint">{{ card.copy.nameHint }}</text>
+      </view>
+
+      <view class="fields">
+        <view class="field">
+          <text class="field__label">{{ card.copy.toLabel }}</text>
+          <input
+            class="field__input"
+            type="text"
+            :value="toDraft"
+            :maxlength="maxNameLen"
+            :placeholder="card.copy.toPlaceholder"
+            placeholder-class="field__ph"
+            @input="onToInput"
+            @blur="onNameBlur"
+            @confirm="onNameBlur"
+          />
+        </view>
+        <view class="field">
+          <text class="field__label">{{ card.copy.fromLabel }}</text>
+          <input
+            class="field__input"
+            type="text"
+            :value="fromDraft"
+            :maxlength="maxNameLen"
+            :placeholder="card.copy.fromPlaceholder"
+            placeholder-class="field__ph"
+            @input="onFromInput"
+            @blur="onNameBlur"
+            @confirm="onNameBlur"
+          />
+        </view>
+      </view>
+
+      <text v-if="nameError" class="nameerr">{{ nameError }}</text>
+      <text v-else class="nametip">{{ signPreview }}</text>
+    </view>
+
     <view class="footnote">
       <text>{{ card.copy.footnote }}</text>
     </view>
@@ -71,6 +113,8 @@
       <view class="result" @click.stop>
         <image class="result__img" :src="resultUrl" mode="widthFix" />
         <text class="result__tip">{{ saveTip }}</text>
+        <!-- 名字不进链接，所以发链接对方看不到名字 —— 有名字时必须说清楚 -->
+        <text v-if="hasName" class="result__notice">{{ card.copy.shareNameTip }}</text>
         <view class="result__row">
           <button class="rbtn rbtn--ghost" @click="restart">{{ card.copy.againCta }}</button>
           <button class="rbtn rbtn--main" @click="saveImage">{{ card.copy.saveCta }}</button>
@@ -112,6 +156,7 @@ import {
   CARD_CANVAS,
   CARD_CANVAS_ID,
   CARD_FILE_PREFIX,
+  MAX_NAME_LEN,
   pickCardTheme,
   createState,
   loadState,
@@ -119,6 +164,7 @@ import {
   reroll,
   nextWish,
   resolveSelection,
+  sanitizeName,
   renderCardBlob,
   downloadBlob,
   releaseUrl,
@@ -144,11 +190,39 @@ const previewBlob = ref(null)
 const resultUrl = ref('')
 const resultBlob = ref(null)
 
+/**
+ * 输入框草稿，刻意与 state 分开
+ *
+ * 因为"用户正在打的字"和"能画进图的字"不是一回事：
+ * 打到一半的"张电话138…"必须留在框里让用户改，但绝不能进 state。
+ * 合成一个字段就会在"拒绝非法输入"时把用户正在打的内容清空。
+ */
+const toDraft = ref('')
+const fromDraft = ref('')
+const nameError = ref('')
+
+/** 名字长度上限，与清洗闸同一个来源，不在页面里写死 */
+const maxNameLen = MAX_NAME_LEN
+
 const stepLabels = computed(() => [
   card.copy.stepArt,
   card.copy.stepWord,
+  card.copy.stepName,
   card.copy.stepGen
 ])
+
+/** 有名字才需要提醒"链接里看不到名字" */
+const hasName = computed(() => !!(state.value.toName || state.value.fromName))
+
+/** 署名文案的即时预览：用户不用等重绘就知道图里会写什么 */
+const signPreview = computed(() => {
+  const { toName, fromName } = state.value
+  const fill = (tpl, n) => String(tpl || '').split('{name}').join(n)
+  const sign = fromName ? fill(card.copy.signTemplate, fromName) : card.copy.signAnon
+  return toName
+    ? `图里会写：${fill(card.copy.toTemplate, toName)} · ${sign}`
+    : `图里会写：${sign}`
+})
 
 /**
  * 当前这一句祝福
@@ -204,6 +278,9 @@ onLoad((options) => {
   if (entry.wishIndex != null) next = { ...next, presetIndex: entry.wishIndex }
   state.value = next
   saveState(next)
+  // 名字不落盘，正常情况下是空的；旧存储里若残留也不算数，仍走同一道归一
+  toDraft.value = next.toName || ''
+  fromDraft.value = next.fromName || ''
   syncShare()
 })
 
@@ -216,6 +293,7 @@ onReady(() => {
 })
 
 onUnload(() => {
+  if (nameTimer) clearTimeout(nameTimer)
   releaseUrl(previewUrl.value)
   releaseUrl(resultUrl.value)
 })
@@ -231,12 +309,14 @@ async function renderPreview() {
   const token = ++previewToken
   drawing.value = true
   try {
-    const { template, wish } = resolveSelection(state.value, card)
+    const { template, wish, greeting, footer } = resolveSelection(state.value, card)
     const res = await renderCardBlob({
       width: CARD_CANVAS.width,
       height: CARD_CANVAS.height,
       template,
       wish,
+      greeting,
+      footer,
       copy: card.copy,
       paperStyle: card.paper
     })
@@ -275,17 +355,118 @@ function onNextWish() {
   renderPreview()
 }
 
+/* ---------------- 署名输入 ---------------- */
+
+let nameTimer = null
+/** 上一次弹过的错误文案：同一个原因只 toast 一次，否则用户改字时会被连弹 */
+let lastErrToast = ''
+
+/** reason → 提示文案。文案在 theme 里，改字不用动这里 */
+function errText(reason) {
+  if (!reason) return ''
+  if (reason === 'too-long') return card.copy.nameErrLong
+  if (reason === 'bad-char') return card.copy.nameErrChar
+  if (reason.indexOf('privacy') === 0) return card.copy.nameErrPrivacy
+  return card.copy.nameErrFlag
+}
+
+/**
+ * 提交一个字段
+ *
+ * 失败时**不写 state、不清输入框**：用户正在打的内容要留在框里让他改，
+ * 画布保持上一次合法值。这一点和祝福语的 sanitizeText 正好相反 ——
+ * 祝福语被替换成兜底句用户看不出来，名字被替换成"圣诞快乐"是荒谬的。
+ *
+ * 刻意不在这里写 nameError：两个字段是一起提交的，
+ * 若各自写同一个错误位，后一个成功就会把前一个的错误清掉（踩过）。
+ * 错误由 commitNames 汇总后统一写。
+ *
+ * @returns {{ok:boolean, changed:boolean, error:string}}
+ */
+function commitName(which, value) {
+  const res = sanitizeName(value)
+  if (!res.ok) return { ok: false, changed: false, error: errText(res.reason) }
+
+  const key = which === 'to' ? 'toName' : 'fromName'
+  if (state.value[key] === res.text) return { ok: true, changed: false, error: '' }
+
+  state.value = { ...state.value, [key]: res.text }
+  return { ok: true, changed: true, error: '' }
+}
+
+function commitNames() {
+  const a = commitName('to', toDraft.value)
+  const b = commitName('from', fromDraft.value)
+
+  // 先报收卡人再报署名：一次只提示一个问题，用户改起来有先后
+  const err = !a.ok ? a.error : !b.ok ? b.error : ''
+  nameError.value = err
+
+  /**
+   * 红字贴在输入框下面，而输入框常常正压在底部固定按钮上 ——
+   * 只靠红字，用户会因为看不见而以为"没反应"。所以同一个错误再 toast 一次，
+   * 但同一句只弹一次，否则边改边弹会烦人。
+   */
+  if (err && err !== lastErrToast) {
+    lastErrToast = err
+    uni.showToast({ title: err, icon: 'none' })
+  } else if (!err) {
+    lastErrToast = ''
+  }
+
+  if (a.changed || b.changed) {
+    saveState(state.value)
+    step.value = Math.max(step.value, 3)
+    renderPreview()
+  }
+}
+
+/**
+ * 防抖 400ms
+ *
+ * 每按一个键就重绘整张 750×1000 太贵，小程序还要走 canvasToTempFilePath。
+ * 400ms 的取舍：打字时不会每个字都触发；中文拼音组字的停顿一般也到不了 400ms，
+ * 万一停住了，提交的是拼音（能过字符白名单），组字结束后会被正确的中文覆盖掉。
+ */
+function scheduleCommit() {
+  if (nameTimer) clearTimeout(nameTimer)
+  nameTimer = setTimeout(() => {
+    nameTimer = null
+    commitNames()
+  }, 400)
+}
+
+function onToInput(e) {
+  toDraft.value = e.detail.value
+  scheduleCommit()
+}
+
+function onFromInput(e) {
+  fromDraft.value = e.detail.value
+  scheduleCommit()
+}
+
+function onNameBlur() {
+  if (nameTimer) {
+    clearTimeout(nameTimer)
+    nameTimer = null
+  }
+  commitNames()
+}
+
 async function generate() {
   if (busy.value || drawing.value) return
   busy.value = true
   try {
-    const { template, wish } = resolveSelection(state.value, card)
+    const { template, wish, greeting, footer } = resolveSelection(state.value, card)
 
     const res = await renderCardBlob({
       width: CARD_CANVAS.width,
       height: CARD_CANVAS.height,
       template,
       wish,
+      greeting,
+      footer,
       copy: card.copy,
       paperStyle: card.paper
     })
@@ -495,6 +676,59 @@ function syncShare() {
   color: var(--ft-text-sub);
 }
 
+/* 署名输入：两个字段竖排，标签在左、输入区占满剩余宽度 */
+.fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.field {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 46px;
+  padding: 0 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-sizing: border-box;
+}
+.field__label {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--ft-text-sub);
+}
+.field__input {
+  flex: 1;
+  min-width: 0;
+  height: 46px;
+  font-size: 15px;
+  color: var(--ft-text);
+  /* uni 的 input 在 H5 带白色内置背景，不覆盖会在深色页面上开个白窗 */
+  background: transparent;
+  border: none;
+  outline: none;
+}
+.field__ph {
+  font-size: 13px;
+  color: var(--ft-text-sub);
+  opacity: 0.75;
+}
+.nametip {
+  display: block;
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--ft-text-sub);
+}
+.nameerr {
+  display: block;
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #FFB3A7;
+}
+
 .footnote {
   padding: 18px 20px 0;
   text-align: center;
@@ -586,6 +820,17 @@ function syncShare() {
   font-size: 12px;
   color: #8A7F72;
   margin: 12px 0 4px;
+}
+/* 弹层是白底，提示得用浅色块，否则和 tip 混成一段 */
+.result__notice {
+  display: block;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #A0503A;
+  background: #FBEFE9;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 6px 0 2px;
 }
 .result__row {
   display: flex;

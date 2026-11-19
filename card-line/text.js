@@ -108,3 +108,37 @@ export function fitText(ctx, text, opts = {}) {
     truncated: true
   }
 }
+
+/**
+ * 单行自适应：只降字号，不折行、不加省略号
+ *
+ * 为什么不能复用 fitText 画名字：
+ *   fitText 是"宁可折行、末行省略"，套在名字上就是"张小…"或"欧阳建国 / 小朋友"，
+ *   两个都是事故。名字的正确答案只有两种：整行放下，或者缩到能放下。
+ *   缩到底还放不下（12 个字符的极端情况）才从尾部截字，且不补省略号 ——
+ *   省略号会让读者以为名字本身不完整，截字只是"显示不全"。
+ *
+ * @returns {{text:string, size:number, width:number, truncated:boolean}}
+ */
+export function fitLine(ctx, text, opts = {}) {
+  const { maxWidth = 500, size = 26, minSize = 18, weight = 500, step = 1 } = opts
+  const chars = Array.from(String(text == null ? '' : text))
+  if (!chars.length) return { text: '', size, width: 0, truncated: false }
+
+  for (let s = size; s >= minSize; s -= step) {
+    const w = measureWidth(ctx, text, s, weight)
+    if (w <= maxWidth) return { text: String(text), size: s, width: w, truncated: false }
+  }
+
+  let rest = chars.slice()
+  while (rest.length > 1 && measureWidth(ctx, rest.join(''), minSize, weight) > maxWidth) {
+    rest.pop()
+  }
+  const out = rest.join('')
+  return {
+    text: out,
+    size: minSize,
+    width: measureWidth(ctx, out, minSize, weight),
+    truncated: rest.length < chars.length
+  }
+}

@@ -74,13 +74,13 @@ globalThis.uni = {
 const load = (name) => import(pathToFileURL(path.join(VFS, 'src/card', name)).href)
 
 const { drawCard } = await load('render.js')
-const { wrapText, fitText, fontString } = await load('text.js')
+const { wrapText, fitText, fitLine, fontString } = await load('text.js')
 const { computeLayout, validateLayout, paperBox } = await load('layout.js')
-const { normalizeState, createState, resolveSelection, reroll, nextWish, resolveWishIndex } = await load('state.js')
+const { normalizeState, createState, resolveSelection, reroll, nextWish, resolveWishIndex, saveState, loadState } = await load('state.js')
 const { pickCardTheme } = await load('theme.js')
 const { drawMotif } = await load('motifs.js')
 const { buildArtwork, createRng, encodeSeed, decodeSeed, normalizeSeed, pickWishIndex } = await load('random.js')
-const { scanText, sanitizeText, scanAll } = await load('safety.js')
+const { scanText, sanitizeText, sanitizeName, clampName, scanAll, MAX_NAME_LEN } = await load('safety.js')
 const { buildCardShareUrl, parseCardEntry } = await load('share.js')
 
 /* ---------- 3. mock canvas ctx ---------- */
@@ -462,6 +462,99 @@ ok(parseCardEntry({ s: encodeSeed(SEED), w: '坏值' }).wishIndex === null, 'w �
 
 globalThis.window.location.hash = '#/pages/card/card?s=' + encodeSeed(SEED) + '&w=5'
 ok(parseCardEntry({}).wishIndex === 5, '从 location.hash 里读到祝福语下标')
+
+/* ---------- 名字闸 ---------- */
+console.log('\n[15] 名字闸（拒绝而不是替换）')
+ok(sanitizeName('妈妈').ok && sanitizeName('妈妈').text === '妈妈', '中文称呼通过')
+ok(sanitizeName('  Alex  ').text === 'Alex', '两端空白被裁掉')
+ok(sanitizeName('小  明').text === '小 明', '连续空格折叠成一个')
+ok(sanitizeName('阿依古丽·买买提').ok, '间隔号「·」允许')
+ok(sanitizeName('Jean-Luc').ok, '连字符「-」允许')
+
+ok(sanitizeName('   ').ok && sanitizeName('   ').text === null, '纯空白视为没填（null 而非空串）')
+ok(sanitizeName(null).ok, 'null 不抛错')
+ok(sanitizeName(undefined).ok, 'undefined 不抛错')
+
+ok(sanitizeName('一'.repeat(MAX_NAME_LEN + 1)).reason === 'too-long', `超过 ${MAX_NAME_LEN} 字被拒`)
+ok(sanitizeName('小明🎄').reason === 'bad-char', 'emoji 被拒（字体不保证渲染）')
+ok(!sanitizeName('\uD83C\uDDE8\uD83C\uDDF3小明').ok, '国旗被拒')
+ok(!sanitizeName('小明!!!').ok, '标点被拒')
+ok(sanitizeName('13800138000').reason.indexOf('privacy') === 0, '手机号被拒')
+ok(sanitizeName('a@b.com').reason.indexOf('privacy') === 0, '邮箱被拒')
+ok(sanitizeName('110105199001011234').reason.indexOf('privacy') === 0, '身份证被拒')
+
+// 刻意放宽：这两张表是给"生成端文案"设的闸，用户主动填的称呼不该误杀
+ok(sanitizeName('王老师').ok, '「王老师」通过（称呼场景）')
+ok(sanitizeName('北京大爷').ok, '「北京大爷」通过（名字闸不查地名表）')
+
+ok(sanitizeName('张\u200B明').text === '张明', '零宽空格被剥掉')
+ok(clampName('一'.repeat(30)).length === MAX_NAME_LEN, 'clampName 超长截断而不拒绝')
+ok(clampName('   ') === null, 'clampName 空白返回 null')
+ok(clampName('张先生') === '张先生', 'clampName 不做安全裁决')
+ok(clampName({ a: 1 }) === null, 'clampName 拒绝对象')
+
+/* ---------- 名字单行排版 ---------- */
+console.log('\n[16] 名字单行自适应')
+const nShort = fitLine(ctx, '妈妈', { maxWidth: 300, size: 26, minSize: 18 })
+ok(nShort.text === '妈妈' && nShort.size === 26, '短名字原样、不降字号')
+
+const nFit = fitLine(ctx, '欧阳建国小朋友', { maxWidth: 100, size: 26, minSize: 18 })
+ok(nFit.text.indexOf('\n') === -1, '长名字不折行')
+ok(nFit.size >= 18 && nFit.size <= 26, `字号落在 18~26（实际 ${nFit.size}）`)
+ok(!nFit.text.endsWith('…'), '不加省略号（「张小…」是事故）')
+
+const nHuge = fitLine(ctx, '一'.repeat(12), { maxWidth: 60, size: 26, minSize: 18 })
+ok(nHuge.size === 18 && nHuge.truncated === true, '缩到底仍放不下时截字')
+ok(!nHuge.text.endsWith('…'), '截断也不补省略号')
+ok(nHuge.width <= 60.001, '截断后宽度不超上限')
+ok(fitLine(ctx, '', { maxWidth: 300 }).text === '', '空串返回空，不抛错')
+
+/* ---------- 称呼与落款 ---------- */
+console.log('\n[17] 称呼与落款文案')
+const rNone = resolveSelection({ seed: SEED, presetIndex: null, toName: null, fromName: null }, card)
+ok(rNone.greeting === '', '没填收卡人时不画称呼行')
+ok(rNone.footer === card.copy.signAnon, `没填署名时落款「${card.copy.signAnon}」`)
+ok(rNone.footer.indexOf('匿名') === -1, '匿名不写成"匿名"二字')
+
+const rFrom = resolveSelection({ seed: SEED, presetIndex: null, toName: null, fromName: '阿花' }, card)
+ok(rFrom.footer === '阿花送你的贺卡', `有署名时落款「阿花送你的贺卡」（实际 ${rFrom.footer}）`)
+ok(rFrom.greeting === '', '只填署名仍无称呼行')
+
+const rBoth = resolveSelection({ seed: SEED, presetIndex: null, toName: '小明', fromName: '阿花' }, card)
+ok(rBoth.greeting === '致 小明', `填了收卡人有称呼行（实际 ${rBoth.greeting}）`)
+ok(rBoth.footer === '阿花送你的贺卡', '落款不受收卡人影响')
+
+const rTo = resolveSelection({ seed: SEED, presetIndex: null, toName: '小明', fromName: null }, card)
+ok(rTo.greeting === '致 小明', '只填收卡人也有称呼行')
+ok(rTo.footer === card.copy.signAnon, '没署名仍是匿名落款')
+
+ok(JSON.stringify(rBoth.template) === JSON.stringify(rNone.template), '有无名字，画面完全一致（名字不进随机流）')
+
+const rDirty = resolveSelection({ seed: SEED, toName: 123, fromName: { a: 1 } }, card)
+ok(rDirty.greeting === '致 123', '数字名字被接受')
+ok(rDirty.footer === card.copy.signAnon, '对象当名字时收敛成匿名')
+
+/* ---------- 名字不外泄 ---------- */
+console.log('\n[18] 名字只进画布')
+const urlWN = buildCardShareUrl({ seed: SEED, wishIndex: 2 })
+ok(urlWN.indexOf('小明') === -1 && urlWN.indexOf('%E5') === -1, '分享链接里没有名字')
+ok(urlWN.includes('sharecode=ABC123'), '链接保留 sharecode')
+
+globalThis.window.location.hash = '#/pages/card/card?s=' + encodeSeed(SEED) + '&to=' + encodeURIComponent('小明')
+const entryN = parseCardEntry({})
+ok(entryN.seed === SEED, 'seed 正常解析')
+ok(entryN.toName === undefined && entryN.fromName === undefined, '手塞的 to/from 不被采纳')
+
+let savedRaw = ''
+globalThis.uni = {
+  setStorageSync: (k, v) => { savedRaw = v },
+  getStorageSync: () => savedRaw
+}
+saveState({ seed: SEED, presetIndex: null, toName: '小明', fromName: '阿花' })
+ok(savedRaw.indexOf('小明') === -1 && savedRaw.indexOf('阿花') === -1, '落盘内容不含名字')
+const rBack = loadState(card)
+ok(rBack.toName === null && rBack.fromName === null, '重新读回来是匿名态')
+ok(rBack.seed === SEED, 'seed 正常恢复')
 
 /* ---------- 收尾 ---------- */
 fs.rmSync(VFS, { recursive: true, force: true })

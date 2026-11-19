@@ -85,6 +85,96 @@ export function sanitizeText(text, fallback) {
   return { text: String(fallback || '圣诞快乐'), replaced: true, hits: res.hits }
 }
 
+/* ------------------------------------------------------------------ *
+ * 名字闸：和祝福语是两套逻辑，别混用
+ *
+ * 祝福语命中黑名单 → 换成兜底句（"圣诞快乐"），用户看不出来也无所谓。
+ * 名字命中黑名单 → **必须拒绝**。用户填"张小明"结果出图写"圣诞快乐"，
+ * 这比拒绝荒谬得多。所以这里返回 ok=false + reason，由 UI 去提示。
+ *
+ * 还有一处刻意放宽：不查 PLACES 和 TITLES。
+ * 那两张表是给"生成端硬编码文案"设的闸；用户主动填的称呼本来就
+ * 指向一个具体的人（"王老师""妈妈"是正常贺卡，不是事故）。
+ * 名字闸真正要防的是**外泄**：电话、证件号、邮箱、账号、国旗。
+ * ------------------------------------------------------------------ */
+
+/** 名字长度上限：12 个字符，中文已经是"欧阳建国小朋友"这种长度了 */
+export const MAX_NAME_LEN = 12
+
+/**
+ * 名字允许的字符：中文、拉丁字母、数字、间隔号、连字符、空白。
+ *
+ * 用白名单而非黑名单，因为名字要画进 canvas —— 字体不保证有的字符
+ * （emoji、国旗、生僻异体）会画成豆腐块。与其事后检测，不如源头不收。
+ * 顺带也解决了国旗问题：区域指示符是代理对，天然过不了单字符白名单。
+ */
+const NAME_CHAR_RE = /^[\u4e00-\u9fa5A-Za-z0-9·\-—\s]$/
+
+/** 零宽与双向控制符：肉眼不可见，却能携带信息，名字里没有存在理由 */
+const ZERO_WIDTH_RE = /[\u200B-\u200F\u202A-\u202E\uFEFF]/g
+
+/**
+ * 温和归一：只清理不裁决，给"外部数据进来"的场景用（storage、旧链接）
+ *
+ * 这里的职责是"别让脏数据把页面搞崩"，不是"判断这个名字能不能用"。
+ * 所以超长就截断、有零宽就剥掉，绝不返回失败。
+ * @returns {string|null} 空则 null（null 表示"没填"，'' 会和"填了空"混淆）
+ */
+export function clampName(raw) {
+  // 只认字符串和数字：对象/数组当成"没填"，否则会得到 "[object Obje" 这种鬼东西
+  const t = typeof raw
+  if (t !== 'string' && t !== 'number') return null
+  const src = String(raw).replace(ZERO_WIDTH_RE, '')
+  const text = src.replace(/\s+/g, ' ').trim().slice(0, MAX_NAME_LEN)
+  return text || null
+}
+
+/**
+ * 名字闸：严格裁决，给"用户正在输入"的场景用
+ *
+ * @returns {{ok:boolean, text:string|null, reason:string|null, hits:string[]}}
+ *   reason: 'too-long' | 'bad-char' | 'privacy:xxx' | null
+ */
+export function sanitizeName(raw) {
+  const src = String(raw == null ? '' : raw).replace(ZERO_WIDTH_RE, '')
+  const text = src.replace(/\s+/g, ' ').trim()
+
+  // 留空是合法状态：不显示称呼 / 落款写"送给你的贺卡"
+  if (!text) return { ok: true, text: null, reason: null, hits: [] }
+
+  /**
+   * 顺序有讲究：隐私 → 字符集 → 长度
+   *
+   * 必须先查隐私再查字符集。邮箱里的 @ 和 . 过不了字符白名单，
+   * 如果字符集先判，用户填邮箱会收到"只能写中文、字母、数字"，
+   * 而正确答案是"这里不要填联系方式"。同理，18 位身份证是纯数字，
+   * 字符集合法，但会先撞上 12 字的长度上限，提示成"名字太长"——
+   * 也不对。所以这三类的优先级：隐私最高，长度最低。
+   */
+  for (const r of PRIVACY_RES) {
+    if (r.re.test(text)) {
+      return { ok: false, text: null, reason: 'privacy:' + r.id, hits: ['privacy:' + r.id] }
+    }
+  }
+
+  // 国旗（字符白名单也能挡住，这里再兜一道，防将来有人放宽字符集）
+  if (FLAG_RE.test(text)) {
+    return { ok: false, text: null, reason: 'flag', hits: ['flag'] }
+  }
+
+  const chars = Array.from(text)
+  const bad = chars.filter((c) => !NAME_CHAR_RE.test(c))
+  if (bad.length) {
+    return { ok: false, text: null, reason: 'bad-char', hits: bad }
+  }
+
+  if (chars.length > MAX_NAME_LEN) {
+    return { ok: false, text: null, reason: 'too-long', hits: ['too-long'] }
+  }
+
+  return { ok: true, text, reason: null, hits: [] }
+}
+
 /**
  * 批量校验（供自测与文案上线前巡检用）
  * @param {string[]} list

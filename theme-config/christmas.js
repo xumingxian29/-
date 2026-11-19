@@ -120,9 +120,10 @@ export default {
     },
     copy: {
       title: '圣诞贺卡',
-      sub: '抽一张可爱画面、随机一句祝福，30 秒存进相册',
+      sub: '抽一张可爱画面、随机一句祝福，写个名字就能送',
       stepArt: '随机造型',
       stepWord: '随机祝福',
+      stepName: '署名',
       stepGen: '生成',
       artHeading: '随机造型',
       artHint: '点「换一张」抽一张新的，画面全是画出来的',
@@ -132,6 +133,21 @@ export default {
       wordHeading: '随机祝福语',
       wordHint: '跟画面一起抽；只想换这一句，点「换一句」',
       wishCta: '换一句',
+      nameHeading: '写给谁',
+      nameHint: '填个称呼就行；留空就是「送给你的贺卡」',
+      toLabel: '收卡人',
+      toPlaceholder: '比如 妈妈、小明（可不填）',
+      fromLabel: '署名',
+      fromPlaceholder: '你的名字（可不填）',
+      /* 三个文案模板，改字不用动代码；{name} 会被替换成用户填的名字 */
+      toTemplate: '致 {name}',
+      signTemplate: '{name}送你的贺卡',
+      signAnon: '送给你的贺卡',
+      /* 名字被拒的四类原因，对应 sanitizeName 返回的 reason */
+      nameErrLong: '名字太长，最多 12 个字',
+      nameErrChar: '只能写中文、字母、数字，别加表情和符号',
+      nameErrPrivacy: '这里不要填电话、证件号、邮箱或账号',
+      nameErrFlag: '换个称呼吧',
       genCta: '生成我的贺卡',
       againCta: '再做一张',
       saveCta: '保存图片',
@@ -142,13 +158,15 @@ export default {
       saveUnsupported: '当前浏览器不支持直接下载，请长按图片保存',
       saveFail: '保存失败，请长按图片保存',
       shareCopied: '链接已复制，去粘贴给朋友',
+      /* 名字不进链接，所以链接分享出去对方看不到名字 —— 这句必须说清楚 */
+      shareNameTip: '链接打开是待填署名的版本；想让他看到名字，直接发图片',
       heroTitle: '圣诞快乐',
       footer: '来自一位朋友的圣诞贺卡 · 2026',
-      footnote: '画面全是几何图形 · 不含任何人名、地名、国旗国徽',
+      footnote: '画面全是几何图形 · 名字只画进图里，不上传、不进链接',
       points: [
         '图片在你的手机里生成，不会上传到任何服务器',
-        '不填昵称、不上传头像，图里不会有你的任何信息',
-        '每次换一张都是新的；分享链接会带上这张的编号，朋友点开看到同一张'
+        '填的名字只画进图里：不进分享链接，也不写进本地存储',
+        '每次换一张都是新的；链接能还原同一张画，署名要对方自己填'
       ],
       backCta: '回到许愿树'
     },

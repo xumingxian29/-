@@ -26,6 +26,24 @@ export const CARD_TEXT = {
   lineHeightRatio: 1.55
 }
 
+/**
+ * 称呼行规则
+ *
+ * 名字和祝福语是两套排版策略，不能共用 fitText：
+ *   祝福语可以折行、可以加省略号收尾（"愿你被这个世界温柔以…"能读）；
+ *   名字不行 —— "张小…" 是事故。所以名字单行、只降字号、绝不折行。
+ */
+export const CARD_NAME = {
+  maxLen: 12,
+  size: 26,
+  minSize: 18,
+  weight: 500,
+  /** 称呼行与祝福语之间的间距 */
+  gap: 14,
+  /** 称呼行的行高倍数，用于算白卡内容总高 */
+  lineHeightRatio: 1.4
+}
+
 /** 白卡内边距 */
 export const CARD_PAPER = { padX: 44, padV: 34 }
 

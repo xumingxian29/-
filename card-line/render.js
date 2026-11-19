@@ -7,9 +7,9 @@
  */
 
 import { computeLayout, paperBox, DECO_POINTS } from './layout'
-import { fitText, fontString } from './text'
+import { fitLine, fitText, fontString } from './text'
 import { drawMotif, drawStar } from './motifs'
-import { CARD_CANVAS, CARD_TEXT, CARD_PAPER } from './config'
+import { CARD_CANVAS, CARD_NAME, CARD_TEXT, CARD_PAPER } from './config'
 
 /**
  * 卡片上的文字色兜底值：只有老模板（没带 text 字段）才会用到。
@@ -108,10 +108,26 @@ function drawHeadline(ctx, L, template, copy, ink) {
 }
 
 function drawWishPaper(ctx, L, spec) {
-  const { wish, paperStyle } = spec
+  const { wish, greeting, paperStyle } = spec
   const paper = paperStyle || { fill: 'rgba(255,255,255,0.94)', ink: '#2B2118', radius: 28 }
 
   const innerW = L.paper.w - CARD_PAPER.padX * 2
+
+  /**
+   * 称呼行（"致 小明"）：走 fitLine 而不是 fitText
+   *
+   * 名字单行、只降字号。用 fitText 的话，长名字要么被折成两行
+   * 把版面顶乱，要么末行变"张小…" —— 名字被省略号吃掉是不能接受的。
+   */
+  const greet = greeting
+    ? fitLine(ctx, greeting, {
+      maxWidth: innerW,
+      size: CARD_NAME.size,
+      minSize: CARD_NAME.minSize,
+      weight: CARD_NAME.weight
+    })
+    : null
+  const greetH = greet ? greet.size * CARD_NAME.lineHeightRatio + CARD_NAME.gap : 0
 
   const fitted = fitText(ctx, wish, {
     maxWidth: innerW,
@@ -122,7 +138,8 @@ function drawWishPaper(ctx, L, spec) {
     lineHeightRatio: CARD_TEXT.lineHeightRatio
   })
 
-  const contentH = fitted.lines.length * fitted.lineHeight + CARD_PAPER.padV * 2
+  // 白卡高度要把称呼行算进去，否则称呼会顶出卡片上沿
+  const contentH = greetH + fitted.lines.length * fitted.lineHeight + CARD_PAPER.padV * 2
   const box = paperBox(L, contentH)
 
   // 白色圆角卡。带一点投影：浅色背景上白卡和白底会糊在一起，边界全靠这个阴影
@@ -146,26 +163,51 @@ function drawWishPaper(ctx, L, spec) {
   ctx.fill()
   ctx.restore()
 
+  // 称呼：比正文淡一档，让人一眼看出这是"抬头"而不是祝福语的第一行
+  if (greet) {
+    ctx.save()
+    ctx.globalAlpha = 0.72
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillStyle = paper.ink
+    ctx.font = fontString(greet.size, CARD_NAME.weight)
+    ctx.fillText(
+      greet.text,
+      box.x + box.w / 2,
+      box.y + CARD_PAPER.padV + (greet.size * CARD_NAME.lineHeightRatio) / 2
+    )
+    ctx.restore()
+  }
+
   // 祝福语
   ctx.save()
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   ctx.fillStyle = paper.ink
   ctx.font = fontString(fitted.size, CARD_TEXT.weight)
-  const startY = box.y + CARD_PAPER.padV + fitted.lineHeight / 2
+  const startY = box.y + CARD_PAPER.padV + greetH + fitted.lineHeight / 2
   fitted.lines.forEach((line, i) => {
     ctx.fillText(line, box.x + box.w / 2, startY + i * fitted.lineHeight)
   })
   ctx.restore()
 
-  return { lines: fitted.lines, size: fitted.size, truncated: fitted.truncated, box }
+  return {
+    lines: fitted.lines,
+    size: fitted.size,
+    truncated: fitted.truncated,
+    box,
+    greeting: greet ? greet.text : '',
+    greetingTruncated: greet ? greet.truncated : false
+  }
 }
 
 /**
  * 画一整张贺卡
  * @param {CanvasRenderingContext2D} ctx
- * @param {{width?:number, height?:number, template:Object, wish:string, copy?:Object, paperStyle?:Object}} spec
- * @returns {{lines:string[], size:number, truncated:boolean, box:Object}}
+ * @param {{width?:number, height?:number, template:Object, wish:string, greeting?:string,
+ *          footer?:string, copy?:Object, paperStyle?:Object}} spec
+ *   greeting 传空串/null 则白卡只有祝福语；footer 优先于 copy.footer
+ * @returns {{lines:string[], size:number, truncated:boolean, box:Object, greeting:string}}
  */
 export function drawCard(ctx, spec = {}) {
   const width = spec.width || CARD_CANVAS.width
@@ -191,14 +233,23 @@ export function drawCard(ctx, spec = {}) {
   drawHeadline(ctx, L, template, copy, ink)
   const paperInfo = drawWishPaper(ctx, L, spec)
 
-  // 落款
-  ctx.save()
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-  ctx.fillStyle = ink.footer
-  ctx.font = fontString(L.footer.size, 400)
-  ctx.fillText(copy.footer || '', L.footer.x, L.footer.y)
-  ctx.restore()
+  // 落款：有署名就是"阿花送你的贺卡"，没填就是"送给你的贺卡"（匿名不写"匿名"二字）
+  const signText = spec.footer == null ? copy.footer || '' : String(spec.footer)
+  if (signText) {
+    const fitSign = fitLine(ctx, signText, {
+      maxWidth: width * 0.84,
+      size: L.footer.size,
+      minSize: 16,
+      weight: 400
+    })
+    ctx.save()
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillStyle = ink.footer
+    ctx.font = fontString(fitSign.size, 400)
+    ctx.fillText(fitSign.text, L.footer.x, L.footer.y)
+    ctx.restore()
+  }
 
   return paperInfo
 }
