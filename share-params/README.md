@@ -6,7 +6,10 @@
 
 ## 对外接口
 
-<code>buildQuery</code> · <code>buildH5ShareUrl</code> · <code>parseEntry(options)</code> · <code>copyText</code> · <code>setupShare({ title, desc, link })</code>
+<code>buildQuery</code> · <code>buildH5ShareUrl</code> · <code>buildUrl(path, params)</code> · <code>parseEntry(options)</code> · <code>copyText</code> · <code>setupShare({ title, desc, link })</code>
+
+> <code>buildUrl</code> 是 2026-11 为 18 号块（贺卡线）补的通用深链：参数任意、不预设业务字段，
+> 但同样保留 <code>location.search</code>。<code>buildH5ShareUrl</code> 是许愿树专用（会剔除 <code>inviter</code> 防串味），两者不要互相替代。
 
 ## 依赖
 

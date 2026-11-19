@@ -1,5 +1,70 @@
 # 变更记录
 
+## 2026-11-19 — 新增 18 号块：贺卡线（v3）
+
+把另一条产品线（单人圣诞贺卡）接进同一套骨架。它不是"又一个页面"，而是与许愿树并列的独立链路，
+所以单独成块，根目录仍是每块一个目录。
+
+### 新增
+
+**18 号块 `card-line/`** —— 11 个文件 + 1 个页面，按单一职责切分：
+
+| 文件 | 职责 |
+|---|---|
+| `config.js` | 画布尺寸、排版规则、存储 key |
+| `theme.js` | 从 `themes/*.js` 的 `card` 段取配置，缺失自动回退 |
+| `text.js` | 字体串拼装、折行、避头点、自动降字号 |
+| `motifs.js` | 雪花 / 麋鹿 / 圣诞树，全矢量路径 |
+| `layout.js` | 版面比例计算 + 不重叠自检 |
+| `render.js` | `drawCard(ctx, spec)` 纯绘制，零平台 API |
+| `state.js` | 选择状态、本地记忆、脏数据收敛 |
+| `export.h5.js` | blob 导出 + 下载 + 微信长按兜底 |
+| `export.js` | 导出壳选择（唯一条件编译点） |
+| `share.js` | 分享链接、分享动作、入口参数解析 |
+| `index.js` | 对外唯一出口 |
+| `card.vue` | 三步交互页面，只 import `@/card` |
+
+**主题块扩展**：`theme-config/christmas.js` 新增 `card` 段（画布 / 白卡 / 全部文案 / 6 条预设祝福语 / 3 套模板）。
+加一个模板只改这一处，页面与 CSS 零改动。`newyear.js` 不提供 `card` 段，由 `card-line/theme.js` 回退到 christmas。
+
+**分享块扩展**：`share-params/share.js` 新增 `buildUrl(path, params)` —— 通用深链，
+保留 `location.search`（托管平台靠 `?sharecode=` 做访问鉴权）。与 `buildH5ShareUrl` 的区别是不预设业务字段、不做参数剔除。
+
+### 相对原始原型修掉的 3 个问题
+
+原型是 257 行单文件 HTML，可跑但有硬伤：
+
+1. **祝福语渲染成一列竖排单字**。`wrap(g, text, 26, 500)` 把 `maxWidth` 和 `font` 传反了，
+   `g.font = 500` 是非法值被静默忽略，`measureText` 沿用上一行的 72px，于是每个字都超过 26px 上限 → 每字一行。
+   现在 `text.js` 强制走 `fontString(size)` 拼完整简写，并加了专门的回归用例。
+2. **emoji 当主视觉**（190px 的 ❄️/🦌/🎄）。Canvas 画 emoji 依赖系统字体，安卓微信常渲染成黑白或缺字。
+   改为全矢量路径绘制。
+3. **`toDataURL` + 长按保存**。iOS 微信里长按 `data:` URI 图片经常不出保存菜单。
+   改为 blob + objectURL，微信 + iOS 直接提示长按，不再"点了没反应"。
+
+另外补了原型没有的：避头点（标点不落行首）、自动降字号（长祝福不砍成省略号）、版面不重叠自检、
+脏数据收敛（模板被删/索引越界不白屏）、分享链接带 `tpl` 且保留 `sharecode`。
+
+### 验证
+
+```bash
+npm run check
+```
+
+- `verify`：61 个块文件、113 条 import，0 未解析
+- `test:card`：**45 项全过**（新增）
+- `test`：22 项、`test:cloud`：29 项，无回归
+
+`test:card` 的做法值得一提：它先按 `manifest.json` 把块**铺成真实工程目录**（临时目录里重写 `@/` 别名与
+无扩展名 import），再 import 目标路径跑测试。所以验证的是"放回工程后的样子"，且**零依赖**，不需要 esbuild。
+canvas 用 mock ctx，`font` 做成存取器（非法值静默忽略）—— 只有这样才能复现第 1 条那个线上事故。
+
+### 已知边界
+
+- 仅实现 H5 端。小程序端只差 `export.mp.js`（`canvasToTempFilePath` + `saveImageToPhotosAlbum`），
+  改 `export.js` 一个分支，绘制层一行不用动。
+- `tpl` 分享参数只在页面首次 `onLoad` 生效；SPA 内仅切 hash 不会重跑组件（真实用户从分享链接进来是新加载）。
+
 ## 2026-11-18 — 缺陷修复与安全加固（v2）
 
 对全仓 17 个块做了一次逐行审查，修掉 3 个阻断级问题、9 个逻辑缺陷、6 个安全/合规问题。

@@ -8,6 +8,16 @@
 
 <code>resolveTheme({ forcedId, treeId, date })</code> · <code>getTheme(id)</code> · <code>listThemes()</code>
 
+## card 段（2026-11 新增）
+
+<code>christmas.js</code> 里多了一个 <code>card</code> 段，供 18 号块（贺卡线）使用：
+<code>canvas</code> / <code>paper</code> / <code>copy</code> / <code>presets</code> / <code>templates</code>。
+
+- 它是贺卡视觉的**唯一来源**：18 号块的绘制层只按这些参数画，不允许出现颜色字面量。
+- <code>newyear.js</code> 故意不提供 <code>card</code> 段，<code>card-line/theme.js</code> 会自动回退到 christmas。
+  新年档要做贺卡时补一份同结构即可，页面与绘制层不用改。
+- 加一个贺卡模板 = 在 <code>card.templates</code> 加一项；若要新图形，再去 18 号块 <code>motifs.js</code> 注册绘制函数。
+
 ## 依赖
 
 01 配置块（读 FORCED_THEME_ID / DEFAULT_TREE_ID）

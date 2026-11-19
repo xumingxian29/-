@@ -7,7 +7,8 @@
   "scripts": {
     "verify": "node scripts/verify.js",
     "test": "node scripts/test-core.js",
+    "test:card": "node scripts/test-card.js",
     "test:cloud": "node scripts/test-cloud.js",
-    "check": "node scripts/verify.js && node scripts/test-core.js && node scripts/test-cloud.js"
+    "check": "node scripts/verify.js && node scripts/test-core.js && node scripts/test-card.js && node scripts/test-cloud.js"
   }
 }

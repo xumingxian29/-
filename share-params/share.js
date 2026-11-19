@@ -51,6 +51,30 @@ function keepPlatformQuery(search) {
   return kept.length ? '?' + kept.join('&') : ''
 }
 
+/**
+ * 通用深链：当前 origin + 保留原 query + 指定 hash 路由
+ *
+ * 与 buildH5ShareUrl 的区别只有一点：参数任意，不预设业务字段，
+ * 供其他产品线（18 号块的贺卡线）复用。同样必须保留 location.search ——
+ * 托管平台常靠 ?sharecode= 这类参数做访问鉴权，丢掉它转发出去的链接就打不开。
+ *
+ * 与 buildH5ShareUrl 不同，这里**不做**参数剔除：调用方传什么就是什么，
+ * 因为贺卡只有 tpl 一个参数，不存在邀请人串味的问题。
+ *
+ * @param {string} path hash 路由，如 '/pages/card/card'
+ * @param {Object} [params] 业务参数
+ */
+export function buildUrl(path, params = {}) {
+  const qs = buildQuery(params)
+  // #ifdef H5
+  const { origin, pathname, search } = window.location
+  return `${origin}${pathname}${search || ''}#${path}${qs ? '?' + qs : ''}`
+  // #endif
+  // #ifndef H5
+  return `${path}${qs ? '?' + qs : ''}`
+  // #endif
+}
+
 /** 复制到剪贴板（两端通用） */
 export function copyText(text, tip = '链接已复制') {
   return new Promise((resolve) => {

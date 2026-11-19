@@ -2,13 +2,14 @@
 
 一套 **uni-app（Vue 3 + Vite）** 代码，同时编译**微信小程序**与 **H5**；换一个节日，只改一份主题配置。
 
-仓库存放的是从真实项目中抽出、跑通过的核心代码，按职责切成 **17 个块**。编号即阅读顺序，也基本等于依赖方向（编号小的被编号大的依赖）。
+仓库存放的是从真实项目中抽出、跑通过的核心代码，按职责切成 **18 个块**。编号即阅读顺序，也基本等于依赖方向（编号小的被编号大的依赖）。
 
 ```
 底座层   01-06   零平台依赖，可单独单测
 适配层   07-11   所有"平台差异"都关在这里
 能力层   12-15   业务语义、海报、分享
 端实现   16-17   云函数、Vue 组件
+产品线   18      贺卡线：第二条独立链路，只依赖 06 + 15 + 17
 ```
 
 ## 块索引
@@ -32,6 +33,7 @@
 | 15 | 分享参数块 | `share-params/` | 两端进入参数与分享链接统一编解码，外加 JS-SDK 分享卡片 |
 | 16 | 云函数块 | `cloud-function/` | 单入口 action 路由 + 会话签发 + 频控 + 内容安全，两端共用 |
 | 17 | 渲染组件块 | `view-components/` | 舞台 / 头像挂件 / 挂树面板 / 海报弹窗，外加 `style.js`（tokens → CSS 变量）|
+| 18 | 贺卡线块 | `card-line/` | 单人贺卡：选模板 → 选祝福 → 出图，零上传零账号；内部再分 11 个小块 + 页面 |
 
 ## 三条架构铁律
 
@@ -66,11 +68,15 @@
 | 15 | `src/core/share.js` + `jssdk.js` |
 | 16 | `cloudfunctions/tree/`（含 `lib/` 9 个文件、`actions/` 7 个文件、`config.json`、`package.json`）|
 | 17 | `src/components/` + `src/utils/style.js` |
+| 18 | `src/card/`（11 个文件）+ `src/pages/card/card.vue` |
 
 完整的「文件 → 目标路径」映射在 `manifest.json` 里，`npm run verify` 就是照着它校验的。
 
 最小可跑集：**01 + 02 + 03 + 04 + 05 + 06 + 07 + 12 + 17** 就能在 H5 跑起一棵能挂头像的树（本地模式，数据不跨设备）。
 接云端再加 **08 + 10 + 16**；接 H5 公网再加 **09**。
+
+**贺卡线（18）是一条独立链路**：只需 **06 + 15 + 17 + 18**，不碰数据层、身份层、云函数。
+两条产品线同时在一个工程里跑，互不 import。
 
 ## 自测与校验（2026-11 新增）
 
@@ -79,12 +85,18 @@
 ```bash
 npm run verify      # 映射完整性 + 每条 import 在目标位置能否解析 + 前后端 limits 对拍
 npm test            # 22 项纯逻辑：存储容错、会话读写、分享链接、海报折行
+npm run test:card   # 45 项贺卡线：折行、避头点、降字号、版面不撞、三图形、脏数据、分享
 npm run test:cloud  # 29 项端到端：假数据库跑 register → joinTree → blessNode → listNodes
-npm run check       # 三个一起跑
+npm run check       # 四个一起跑
 ```
 
-`test:cloud` 的做法是把 `wx-server-sdk` 换成内存假库（`scripts/_wx-server-sdk.cjs`），
-直接调 `exports.main`，走的是**真实业务代码**，不是另写一份 mock 逻辑。
+两个值得一提的做法：
+
+- `test:cloud` 把 `wx-server-sdk` 换成内存假库（`scripts/_wx-server-sdk.cjs`），直接调 `exports.main`，
+  走的是**真实业务代码**，不是另写一份 mock 逻辑。
+- `test:card` 先按 `manifest.json` 把块**铺成真实工程目录**（临时目录里重写 `@/` 别名与无扩展名 import），
+  再 import 目标路径去跑。所以它验证的是"放回工程后的样子"，而且**零依赖**，不需要 esbuild / vite。
+  canvas 用 mock ctx：`font` 做成存取器，非法值被静默忽略——这样才抓得住"`ctx.font = 26` 导致每字一行"这类 bug。
 
 ## 已验证过的结论
 
@@ -92,12 +104,14 @@ npm run check       # 三个一起跑
 - 条件编译生效：H5 产物中 `wx.cloud` 出现 0 次，本地实现与内联 SVG 头像正常保留
 - 云函数块 29 项端到端全过（详情见 `CHANGELOG.md`）：会话验签、并发祝福只计一次、跨口径排序、IP 频控
 - 纯逻辑 22 项全过：坏数据自愈、分享链接保留 `sharecode` 且剔除旧 `inviter`、长文本折行截断
-- 全部 49 个块文件的 import 在目标路径下可解析（`npm run verify`）
+- 贺卡线 45 项全过：折行不出「每字一行」、标点不落行首、长祝福自动降字号不撞版面、三套模板可绘制、脏数据收敛到默认值
+- 全部 61 个块文件的 import 在目标路径下可解析（`npm run verify`，113 条导入 0 未解析）
 
 > 注：2026-11 这批修复之后**没有**再跑过 uni-app 双端编译（本仓库没有构建工程）。
 > `platform-switch` 与 `poster-render` 的出口文件改动过写法，重新放回工程后建议先 `npm run build:h5` 验一次。
+> 贺卡线在源工程里跑过 `build:h5` 并用真机视口截图验证过（选择页 / 生成结果 / 三套模板渲染）。
 
-## 十三个真踩过的坑
+## 十六个真踩过的坑
 
 1. `project.config.json` 会被 uni-app 编译覆盖 —— 用 `project.prod.config.json` 另存，别直接改产物。
 2. canvas 实例进 reactive 后被 Vue3 代理，`canvasToTempFilePath` 拿到 undefined，且不报错。
@@ -112,6 +126,9 @@ npm run check       # 三个一起跑
 11. **`#ifdef` 里的重复声明**：`const impl = ...` 写两次，出了 uni-app 编译器就是语法错（`node --check` 直接红）。
 12. **字段只在读的一侧存在**：`blessNode` 读 `node.sortMode`，但写库时从来没写过这个字段，于是永远走默认分支，榜单静默排错。
 13. **"先上传后校验"会留垃圾**：心愿被拒时头像已经进了云存储，没人删。要么先校验，要么失败时补偿删除。
+14. **`ctx.font = 26` 不报错，但也不生效**：裸数字不是合法 CSS font，浏览器直接忽略，`measureText` 沿用上一个字号 —— 画出来是**每个字单独一行**。必须用完整简写 `600 34px sans-serif`。
+15. **canvas 画 emoji 等于把渲染交给系统字体**：安卓微信常出黑白或方块，同一份代码在不同机型长得不一样。主视觉一律矢量路径。
+16. **`flex: 1` 三等分在父级宽度异常时会被内容撑开**：三个模板卡片会挤出视口，且看起来像"样式没生效"。改用 `grid-template-columns: repeat(3, minmax(0, 1fr))`。
 
 ## 声明
 

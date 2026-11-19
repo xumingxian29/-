@@ -106,6 +106,90 @@ export default {
     topSlotLabel: '树顶'
   },
 
+  /**
+   * 贺卡线（18 号块 card-line）
+   *
+   * 与许愿树并列的第二条产品线：单人贺卡，零上传、零键盘、零账号，三步出图。
+   * 与许愿树共用本主题的 tokens 与节日定位，但版式、文案、模板全部自成一套。
+   *
+   * 这里是贺卡视觉的唯一来源：18 号块的绘制层只按这些参数画，
+   * 不允许出现颜色字面量。加一个模板只改 `templates`，页面与 CSS 零改动。
+   */
+  card: {
+    canvas: { width: 750, height: 1000 },
+    paper: {
+      fill: 'rgba(255, 255, 255, 0.94)',
+      ink: '#2B2118',
+      radius: 28
+    },
+    copy: {
+      title: '圣诞贺卡',
+      sub: '选个模板、选句祝福，30 秒生成一张存进相册',
+      stepTpl: '选模板',
+      stepWord: '选祝福',
+      stepGen: '生成',
+      tplHeading: '选个模板',
+      tplHint: '点一下就换，不用上传任何东西',
+      wordHeading: '选句祝福',
+      wordHint: '都是现成的，一个字都不用打',
+      genCta: '生成我的贺卡',
+      againCta: '再做一张',
+      saveCta: '保存图片',
+      shareCta: '分享给朋友',
+      saveTip: '长按图片即可保存到相册',
+      savedTip: '已保存，去相册看看',
+      saveUnsupported: '当前浏览器不支持直接下载，请长按图片保存',
+      saveFail: '保存失败，请长按图片保存',
+      shareCopied: '链接已复制，去粘贴给朋友',
+      heroTitle: '圣诞快乐',
+      footer: '来自一位朋友的圣诞贺卡 · 2026',
+      footnote: '全程零上传 · 零键盘 · 零账号',
+      backCta: '回到许愿树'
+    },
+    presets: [
+      '圣诞快乐，平安喜乐',
+      '冬天很冷，你很暖',
+      '愿你被这个世界温柔以待',
+      '圣诞快乐，来年好运',
+      '平安夜，记得吃苹果',
+      'Merry Christmas，心想事成'
+    ],
+    templates: [
+      {
+        id: 'snow',
+        name: '雪花夜',
+        motif: 'snow',
+        bg: ['#1A2A5E', '#2E4A9E'],
+        ink: '#FFFFFF',
+        accent: '#FFFFFF',
+        deco: 'rgba(255, 255, 255, 0.72)',
+        tag: '雪花夜'
+      },
+      {
+        id: 'deer',
+        name: '红鼻麋鹿',
+        motif: 'deer',
+        bg: ['#B3282D', '#7A1A1E'],
+        // 深褐到近黑的头，才压得住深红背景；鼻子单独给亮红，不用装饰金
+        ink: '#1F0B06',
+        nose: '#E0353A',
+        accent: '#F2C14E',
+        deco: 'rgba(255, 215, 130, 0.62)',
+        tag: '红鼻麋鹿'
+      },
+      {
+        id: 'tree',
+        name: '圣诞树下',
+        motif: 'tree',
+        bg: ['#14532D', '#1F7A3D'],
+        ink: '#0A3220',
+        accent: '#E8B84B',
+        deco: 'rgba(255, 255, 255, 0.50)',
+        tag: '圣诞树下'
+      }
+    ]
+  },
+
   rules: {
     sortMode: 'invite', // 圣诞档历史机制：按邀请人数排位
     allowInviteRank: true,

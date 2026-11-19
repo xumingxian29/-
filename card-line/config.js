@@ -1,0 +1,33 @@
+/**
+ * 块 1 · 常量
+ *
+ * 贺卡线所有"魔法数字"都在这里，别处一律引用。
+ * 视觉颜色不进这个文件 —— 颜色只在 themes/*.js 的 card 段里。
+ */
+
+/** 贺卡页路由，分享链接与页面跳转共用 */
+export const CARD_PATH = '/pages/card/card'
+
+/** 画布尺寸：3:4，朋友圈与手机竖屏都能完整显示 */
+export const CARD_CANVAS = { width: 750, height: 1000 }
+
+/** 祝福语排版规则 */
+export const CARD_TEXT = {
+  maxLines: 3,
+  size: 34,
+  minSize: 24,
+  weight: 600,
+  lineHeightRatio: 1.55
+}
+
+/** 白卡内边距 */
+export const CARD_PAPER = { padX: 44, padV: 34 }
+
+/** canvas 字体栈：必须是系统字体，不引外链字体（画布不等待字体加载） */
+export const CARD_FONT = 'PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif'
+
+/** 本地记住上次选择，下次进来还是那套 */
+export const CARD_STORAGE_KEY = 'ft_card_choice_v1'
+
+/** 导出文件名前缀 */
+export const CARD_FILE_PREFIX = 'christmas-card'

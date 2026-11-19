@@ -62,6 +62,8 @@ export default {
     localModeTip: '体验版：数据只存在本机，换设备看不到别人的愿望'
   },
 
+  // 贺卡线（18 号块）本主题暂不提供 card 段：card-line/theme.js 会回退到 christmas.card。
+  // 新年档要做贺卡时，在这里补一份同结构的 card 段即可，页面与绘制层不用改。
   rules: {
     ...christmas.rules,
     // 春节档：按"被祝福次数"排序，且不设邀请解锁门槛
