@@ -131,13 +131,13 @@ export function drawDeer(ctx, cx, cy, s, opt = {}) {
   antler(1)
   antler(-1)
 
-  // 耳朵：向外伸出，带浅色内耳
+  // 耳朵：小一点、往上翘。第一版画到 0.2 宽又平伸，小尺寸下整体读成"蝙蝠"
   ctx.fillStyle = ink
-  fillEllipse(ctx, 0.44, -0.24, 0.2, 0.095, 0.42)
-  fillEllipse(ctx, -0.44, -0.24, 0.2, 0.095, -0.42)
-  ctx.fillStyle = 'rgba(255, 198, 190, 0.4)'
-  fillEllipse(ctx, 0.47, -0.24, 0.105, 0.045, 0.42)
-  fillEllipse(ctx, -0.47, -0.24, 0.105, 0.045, -0.42)
+  fillEllipse(ctx, 0.375, -0.285, 0.155, 0.07, 0.62)
+  fillEllipse(ctx, -0.375, -0.285, 0.155, 0.07, -0.62)
+  ctx.fillStyle = 'rgba(255, 198, 190, 0.42)'
+  fillEllipse(ctx, 0.4, -0.29, 0.078, 0.03, 0.62)
+  fillEllipse(ctx, -0.4, -0.29, 0.078, 0.03, -0.62)
 
   // 头部：上圆下收，底部留一小段平底
   ctx.fillStyle = ink
@@ -159,6 +159,11 @@ export function drawDeer(ctx, cx, cy, s, opt = {}) {
   ctx.fillStyle = '#120704'
   fillEllipse(ctx, -0.135, -0.185, 0.033, 0.038)
   fillEllipse(ctx, 0.135, -0.185, 0.033, 0.038)
+
+  // 腮红：贴着脸的外缘，是"可爱"最省力的一笔
+  ctx.fillStyle = opt.blush || 'rgba(233, 96, 112, 0.30)'
+  fillEllipse(ctx, -0.185, 0.02, 0.07, 0.038)
+  fillEllipse(ctx, 0.185, 0.02, 0.07, 0.038)
 
   // 红鼻子
   ctx.fillStyle = nose
