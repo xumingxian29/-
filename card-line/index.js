@@ -40,6 +40,7 @@ export {
   decodeSeed,
   randomSeed,
   nextSeed,
+  pickWishIndex,
   buildArtwork
 } from './random'
 
@@ -49,6 +50,8 @@ export {
   createState,
   normalizeState,
   reroll,
+  nextWish,
+  resolveWishIndex,
   selectPreset,
   loadState,
   saveState,

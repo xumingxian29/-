@@ -33,20 +33,21 @@
       </button>
     </view>
 
+    <!-- 第二步：祝福语也是抽出来的，不用挑。只想换这一句就单独换，画面留着 -->
     <view class="sec">
       <view class="sec__hd">
         <text class="sec__title">{{ card.copy.wordHeading }}</text>
         <text class="sec__hint">{{ card.copy.wordHint }}</text>
       </view>
-      <view class="words">
-        <text
-          v-for="(w, i) in card.presets"
-          :key="i"
-          class="word"
-          :class="{ 'word--on': i === state.presetIndex }"
-          @click="onPickPreset(i)"
-        >{{ w }}</text>
+
+      <view class="wishbox">
+        <text class="wishbox__mark">“</text>
+        <text class="wishbox__txt">{{ wishText }}</text>
       </view>
+
+      <button class="reroll reroll--ghost" :disabled="drawing || busy" @click="onNextWish">
+        {{ card.copy.wishCta }}
+      </button>
     </view>
 
     <view class="footnote">
@@ -116,7 +117,7 @@ import {
   loadState,
   saveState,
   reroll,
-  selectPreset,
+  nextWish,
   resolveSelection,
   renderCardBlob,
   downloadBlob,
@@ -149,6 +150,14 @@ const stepLabels = computed(() => [
   card.copy.stepGen
 ])
 
+/**
+ * 当前这一句祝福
+ *
+ * 走 resolveSelection 而不是自己取 presets[i]：那里还有内容安全闸，
+ * 页面上显示的必须和画进图里的是同一句（含兜底替换后的结果）。
+ */
+const wishText = computed(() => resolveSelection(state.value, card).wish)
+
 /** 小程序端离屏画布的 id，与 <canvas> 绑定，必须和 config 里保持一致 */
 const canvasId = CARD_CANVAS_ID
 
@@ -169,22 +178,30 @@ const saveTip = computed(() => {
 // 小程序转发：path 已经是 '/pages/card/card?s=xxx'（buildUrl 的非 H5 分支）
 onShareAppMessage(() => ({
   title: card.copy.title,
-  path: buildCardShareUrl({ seed: state.value.seed }),
+  path: buildCardShareUrl({ seed: state.value.seed, wishIndex: pinnedWishIndex() }),
   imageUrl: resultUrl.value || previewUrl.value || ''
 }))
 
 onShareTimeline(() => ({
   title: card.copy.title,
-  query: 's=' + encodeSeed(state.value.seed),
+  query: 's=' + encodeSeed(state.value.seed) + (pinnedWishIndex() == null ? '' : '&w=' + pinnedWishIndex()),
   imageUrl: resultUrl.value || previewUrl.value || ''
 }))
 // #endif
+
+/** 祝福语被「换一句」钉住过才需要进链接；null 表示由 seed 决定，不用带 */
+function pinnedWishIndex() {
+  const i = state.value.presetIndex
+  return Number.isInteger(i) && i >= 0 ? i : undefined
+}
 
 onLoad((options) => {
   const entry = parseCardEntry(options || {})
   let next = loadState(card)
   // 分享链接里带了 seed 就用它 —— 朋友点开看到的是同一张
   if (entry.seed) next = { ...next, seed: entry.seed }
+  // 连同祝福语一起还原，否则"同一张"只对了一半
+  if (entry.wishIndex != null) next = { ...next, presetIndex: entry.wishIndex }
   state.value = next
   saveState(next)
   syncShare()
@@ -249,8 +266,9 @@ function onReroll() {
   renderPreview()
 }
 
-function onPickPreset(i) {
-  state.value = selectPreset(state.value, card, i)
+function onNextWish() {
+  if (drawing.value || busy.value) return
+  state.value = nextWish(state.value, card)
   saveState(state.value)
   step.value = Math.max(step.value, 2)
   // 祝福语印在图上，换了就必须重画，否则"预览"和"成图"说的不是一件事
@@ -298,7 +316,7 @@ async function saveImage() {
 }
 
 async function onShare() {
-  const url = buildCardShareUrl({ seed: state.value.seed })
+  const url = buildCardShareUrl({ seed: state.value.seed, wishIndex: pinnedWishIndex() })
   const r = await shareCard({ url, title: card.copy.title, text: card.copy.sub })
   if (r === 'copied') {
     uni.showToast({ title: card.copy.shareCopied, icon: 'none' })
@@ -323,7 +341,7 @@ function syncShare() {
   setupShare({
     title: card.copy.title,
     desc: card.copy.sub,
-    link: buildCardShareUrl({ seed: state.value.seed }),
+    link: buildCardShareUrl({ seed: state.value.seed, wishIndex: pinnedWishIndex() }),
     imgUrl: ''
   })
   // #endif
@@ -441,24 +459,40 @@ function syncShare() {
   opacity: 0.5;
 }
 
-.words {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+/* 抽出来的那句祝福：做成一块"引文"，让人一眼看出这是结果而不是待选项 */
+.wishbox {
+  position: relative;
+  padding: 15px 16px 15px 30px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-left: 3px solid var(--ft-accent);
 }
-.word {
-  padding: 8px 13px;
-  border-radius: 99px;
-  font-size: 13px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+.wishbox__mark {
+  position: absolute;
+  left: 11px;
+  top: 8px;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--ft-accent);
+  opacity: 0.7;
+}
+.wishbox__txt {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.55;
   color: var(--ft-text);
 }
-.word--on {
-  background: var(--ft-accent);
-  border-color: var(--ft-accent);
-  color: #0B3D2E;
-  font-weight: 700;
+
+/* 次要按钮：换一句只动文案，别和"换一张"抢视觉重量 */
+.reroll--ghost {
+  margin-top: 10px;
+  padding: 10px;
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.16);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ft-text-sub);
 }
 
 .footnote {

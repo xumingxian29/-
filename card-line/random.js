@@ -145,3 +145,31 @@ export function buildArtwork(seed, card) {
 export function nextSeed(seed) {
   return normalizeSeed(normalizeSeed(seed) * 1103515245 + 12345)
 }
+
+/**
+ * 祝福语抽签的盐值
+ *
+ * 单独开一条随机流，故意不和 buildArtwork 共用：
+ * 共用的话，往 RNG 里多插一次取数，后面所有取数都会错位 ——
+ * 同一个 seed 的老链接画出来的图就变了。分享链接"同一张"的承诺当场破功。
+ */
+const WISH_SALT = 0x85ebca6b
+
+/**
+ * 由 seed 决定用第几句祝福
+ *
+ * 为什么不让页面直接 Math.random() 抽：
+ * 祝福语是印在图上的。图上有一句话，链接里就只有 seed ——
+ * 如果这句话是页面临时随机的，朋友点开链接看到的是另一句，
+ * "朋友点开看到同一张"就成了假话。所以必须由 seed 唯一决定。
+ *
+ * @param {number} seed
+ * @param {number} count 候选句数
+ * @returns {number} 0..count-1
+ */
+export function pickWishIndex(seed, count) {
+  const n = Math.max(1, Math.floor(Number(count)) || 1)
+  const rng = createRng((normalizeSeed(seed) ^ WISH_SALT) >>> 0)
+  const i = Math.floor(rng() * n)
+  return i < 0 ? 0 : i > n - 1 ? n - 1 : i
+}

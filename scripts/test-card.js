@@ -76,10 +76,10 @@ const load = (name) => import(pathToFileURL(path.join(VFS, 'src/card', name)).hr
 const { drawCard } = await load('render.js')
 const { wrapText, fitText, fontString } = await load('text.js')
 const { computeLayout, validateLayout, paperBox } = await load('layout.js')
-const { normalizeState, createState, resolveSelection, reroll } = await load('state.js')
+const { normalizeState, createState, resolveSelection, reroll, nextWish, resolveWishIndex } = await load('state.js')
 const { pickCardTheme } = await load('theme.js')
 const { drawMotif } = await load('motifs.js')
-const { buildArtwork, createRng, encodeSeed, decodeSeed, normalizeSeed } = await load('random.js')
+const { buildArtwork, createRng, encodeSeed, decodeSeed, normalizeSeed, pickWishIndex } = await load('random.js')
 const { scanText, sanitizeText, scanAll } = await load('safety.js')
 const { buildCardShareUrl, parseCardEntry } = await load('share.js')
 
@@ -354,20 +354,51 @@ ok(cu.calls.some((x) => x[0] === 'fill'), '未知 motif 兜底画星，不留白
 console.log('\n[11] 脏数据收敛')
 const base = createState(card, SEED)
 ok(base.seed === SEED, '可传入种子开局（分享入口需要确定性）')
-ok(base.presetIndex === 0, '默认第一句祝福')
+ok(base.presetIndex === null, '祝福语默认不钉死，跟着 seed 抽')
 
 const dirty = normalizeState(card, { seed: 'abc', presetIndex: 999 })
 ok(Number.isFinite(dirty.seed) && dirty.seed > 0, '坏 seed 收敛成合法种子')
-ok(dirty.presetIndex === 0, '越界索引回退')
+ok(dirty.presetIndex === null, '越界索引回到随机，而不是强行给 0')
 
 const dirty2 = normalizeState(card, { seed: SEED, presetIndex: '2' })
 ok(dirty2.seed === SEED, '合法 seed 保留')
-ok(dirty2.presetIndex === 2, '数字字符串索引被接受')
+ok(dirty2.presetIndex === 2, '数字字符串索引被接受（分享参数是字符串）')
 
 const sel = resolveSelection(dirty2, card)
 ok(!!sel.template && sel.template.seed === SEED, '选中画稿可解析')
-ok(sel.wish === card.presets[2], '选中祝福可解析')
+ok(sel.wish === card.presets[2], '钉住的祝福可解析')
 ok(sel.template === sel.art, 'template 与 art 是同一对象')
+
+/* ---------- 祝福语随机化 ---------- */
+console.log('\n[11b] 祝福语随机化')
+ok(pickWishIndex(SEED, 6) === pickWishIndex(SEED, 6), '同一 seed 抽出同一句')
+ok(
+  resolveSelection({ seed: SEED, presetIndex: null }, card).wish === resolveSelection(createState(card, SEED), card).wish,
+  '默认状态与显式 null 抽到同一句'
+)
+
+const hit = new Array(card.presets.length).fill(0)
+for (let i = 0; i < 200; i++) hit[pickWishIndex(1000 + i * 7919, card.presets.length)]++
+ok(hit.filter((n) => n > 0).length >= 12, `200 次抽签覆盖 ${hit.filter((n) => n > 0).length}/${card.presets.length} 句`)
+ok(Math.max(...hit) / 200 < 0.25, '没有哪一句被抽到超过 25%（分布没塌）')
+
+let cur = { seed: SEED, presetIndex: null }
+let prev = resolveSelection(cur, card).wish
+let alwaysDiff = true
+for (let i = 0; i < 40; i++) {
+  cur = nextWish(cur, card)
+  const w = resolveSelection(cur, card).wish
+  if (w === prev) alwaysDiff = false
+  prev = w
+}
+ok(alwaysDiff, '「换一句」每次都给不同的句子')
+
+const pinned = nextWish({ seed: SEED, presetIndex: null }, card)
+const fresh = reroll(pinned)
+ok(pinned.presetIndex !== null, '「换一句」会钉住一句')
+ok(fresh.presetIndex === null, '换一张把手选的句子放回随机（整张重抽）')
+ok(fresh.seed !== pinned.seed, '换一张同时换画面')
+ok(resolveWishIndex({ seed: SEED, presetIndex: 999 }, card) === pickWishIndex(SEED, card.presets.length), '下标非法时退回按 seed 抽')
 
 /* ---------- 内容安全 ---------- */
 console.log('\n[12] 内容安全')
@@ -420,6 +451,17 @@ ok(parseCardEntry({ s: '不合法' }).seed === null, '坏参数返回 null 而�
 // 从 hash 路由里读（朋友点开分享链接走的就是这条路）
 globalThis.window.location.hash = '#/pages/card/card?s=' + encodeSeed(SEED)
 ok(parseCardEntry({}).seed === SEED, '从 location.hash 里读到 seed')
+
+// 祝福语被「换一句」钉住过，必须一起进链接，否则朋友看到的句子和图上不一样
+const urlW = buildCardShareUrl({ seed: SEED, wishIndex: 3 })
+ok(urlW.includes('&w=3'), '钉住的祝福语进链接', urlW)
+ok(buildCardShareUrl({ seed: SEED }).includes('w=') === false, '未钉住时链接不带 w')
+ok(parseCardEntry({ s: encodeSeed(SEED), w: '3' }).wishIndex === 3, '解析出祝福语下标')
+ok(parseCardEntry({ s: encodeSeed(SEED) }).wishIndex === null, '没带 w 时交给 seed 抽')
+ok(parseCardEntry({ s: encodeSeed(SEED), w: '坏值' }).wishIndex === null, 'w 坏值不抛错')
+
+globalThis.window.location.hash = '#/pages/card/card?s=' + encodeSeed(SEED) + '&w=5'
+ok(parseCardEntry({}).wishIndex === 5, '从 location.hash 里读到祝福语下标')
 
 /* ---------- 收尾 ---------- */
 fs.rmSync(VFS, { recursive: true, force: true })
