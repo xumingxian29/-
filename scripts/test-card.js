@@ -82,6 +82,7 @@ const { drawMotif } = await load('motifs.js')
 const { buildArtwork, createRng, encodeSeed, decodeSeed, normalizeSeed, pickWishIndex } = await load('random.js')
 const { scanText, sanitizeText, sanitizeName, clampName, scanAll, MAX_NAME_LEN } = await load('safety.js')
 const { buildCardShareUrl, parseCardEntry } = await load('share.js')
+const { createMusic, noteFreq, MELODY, melodyBeats } = await load('music.h5.js')
 
 /* ---------- 3. mock canvas ctx ---------- */
 
@@ -393,12 +394,73 @@ for (let i = 0; i < 40; i++) {
 }
 ok(alwaysDiff, '「换一句」每次都给不同的句子')
 
-const pinned = nextWish({ seed: SEED, presetIndex: null }, card)
-const fresh = reroll(pinned)
-ok(pinned.presetIndex !== null, '「换一句」会钉住一句')
-ok(fresh.presetIndex === null, '换一张把手选的句子放回随机（整张重抽）')
-ok(fresh.seed !== pinned.seed, '换一张同时换画面')
-ok(resolveWishIndex({ seed: SEED, presetIndex: 999 }, card) === pickWishIndex(SEED, card.presets.length), '下标非法时退回按 seed 抽')
+ok(resolveWishIndex({ seed: SEED, presetIndex: 999 }, card) === pickWishIndex(SEED, card.presets.length), '下标非法时退回按种子抽')
+
+/* ---------- 画面与祝福语解耦 ---------- */
+console.log('\n[11c] 换画面不换祝福、换祝福不换画面')
+const base9 = createState(card, SEED)
+ok(base9.wishSeed === SEED, '初次进入时祝福种子跟画面种子同源（老链接行为不变）')
+
+const selBase = resolveSelection(base9, card)
+const selRoll = resolveSelection(reroll(base9), card)
+ok(selRoll.art.id !== selBase.art.id, '换一张确实画出了另一张')
+ok(selRoll.wish === selBase.wish, '换一张后祝福语仍是同一句')
+ok(selRoll.wishIndex === selBase.wishIndex, '换一张后祝福下标不变')
+
+let keptState = base9
+let stable = true
+for (let i = 0; i < 5; i++) {
+  keptState = reroll(keptState)
+  if (resolveSelection(keptState, card).wish !== selBase.wish) stable = false
+}
+ok(stable, '连点 5 次「换一张」，祝福语始终是同一句')
+
+const selWish1 = resolveSelection(base9, card)
+// nextWish 的步长是随机的，只能调一次再复用，否则两次拿到的是不同句子
+const posed = nextWish(base9, card)
+const selWish2 = resolveSelection(posed, card)
+ok(selWish2.art.id === selWish1.art.id, '换一句后画面与之前完全相同')
+ok(selWish2.art.particles.length === selWish1.art.particles.length, '连粒子数量都没变')
+ok(selWish2.wish !== selWish1.wish, '换一句确实换了文案')
+
+const late = resolveSelection(reroll(posed), card)
+ok(late.wish === selWish2.wish, '先换句再换图，句子仍保留')
+ok(late.art.id !== selWish2.art.id, '先换句再换图，画面确实变了')
+
+const legacy = normalizeState(card, { seed: SEED })
+ok(legacy.wishSeed === SEED, '旧链接（只有 s）缺省把祝福种子设为 s')
+ok(
+  resolveSelection(legacy, card).wish === card.presets[pickWishIndex(SEED, card.presets.length)],
+  '旧链接的祝福语与旧版算法一致，已发出的链接不会变句子'
+)
+
+let altWishSeed = SEED + 1
+for (let s2 = SEED + 1; s2 < SEED + 500; s2++) {
+  if (pickWishIndex(s2, card.presets.length) !== pickWishIndex(SEED, card.presets.length)) {
+    altWishSeed = s2
+    break
+  }
+}
+const swap = normalizeState(card, { seed: SEED, wishSeed: altWishSeed })
+ok(swap.seed === SEED, '只换祝福种子时画面种子不变')
+ok(resolveSelection(swap, card).wish !== resolveSelection(legacy, card).wish, '换祝福种子确实换到另一句')
+
+/* ---------- 背景音乐 ---------- */
+console.log('\n[11d] 背景音乐（合成旋律）')
+ok(noteFreq('A4') === 440, 'A4 = 440Hz')
+ok(Math.abs(noteFreq('A5') - 880) < 0.01, '高八度频率翻倍')
+ok(Math.abs(noteFreq('C4') - 261.63) < 0.1, 'C4 ≈ 261.63Hz')
+ok(noteFreq('') === 0 && noteFreq('H4') === 0, '坏音名返回 0 而不是 NaN')
+ok(MELODY.every((n) => noteFreq(n[0]) > 0), '每个音都能算出频率（没有拼错的音名）')
+ok(MELODY.every((n) => Number(n[1]) > 0), '每个音都有正的拍数（没有写坏的节奏）')
+ok(melodyBeats() === 32, `一轮 32 拍（实际 ${melodyBeats()}）`)
+const silent = createMusic()
+ok(silent.supported === true, 'H5 播放器声明自己可用')
+ok(silent.start() === false, '拿不到 AudioContext 时 start() 返回 false')
+ok(silent.playing === false, '没能起播就不谎报 playing')
+silent.stop()
+silent.dispose()
+ok(true, 'stop / dispose 在未起播状态下可安全调用')
 
 /* ---------- 内容安全 ---------- */
 console.log('\n[12] 内容安全')
@@ -459,6 +521,15 @@ ok(buildCardShareUrl({ seed: SEED }).includes('w=') === false, '未钉住时链�
 ok(parseCardEntry({ s: encodeSeed(SEED), w: '3' }).wishIndex === 3, '解析出祝福语下标')
 ok(parseCardEntry({ s: encodeSeed(SEED) }).wishIndex === null, '没带 w 时交给 seed 抽')
 ok(parseCardEntry({ s: encodeSeed(SEED), w: '坏值' }).wishIndex === null, 'w 坏值不抛错')
+
+// 画面种子与祝福种子不同时，必须把祝福种子也带过去
+const urlWs = buildCardShareUrl({ seed: SEED, wishSeed: SEED + 987654 })
+ok(urlWs.includes('ws='), '两颗种子不同时链接带上 ws')
+ok(urlWs.includes('s=' + encodeSeed(SEED)), '同时仍带画面种子')
+ok(buildCardShareUrl({ seed: SEED, wishSeed: SEED }).includes('ws=') === false, '两颗种子相同时不塞多余的 ws')
+ok(parseCardEntry({ s: encodeSeed(SEED), ws: encodeSeed(SEED + 987654) }).wishSeed === SEED + 987654, 'ws 解析成祝福种子')
+ok(parseCardEntry({ s: encodeSeed(SEED), ws: '%%%%' }).wishSeed === null, '坏 ws 解析成 null 而不是抛错')
+ok(parseCardEntry({ s: encodeSeed(SEED) }).wishSeed === null, '没带 ws 时交给页面按 s 回落')
 
 globalThis.window.location.hash = '#/pages/card/card?s=' + encodeSeed(SEED) + '&w=5'
 ok(parseCardEntry({}).wishIndex === 5, '从 location.hash 里读到祝福语下标')

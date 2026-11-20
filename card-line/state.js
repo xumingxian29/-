@@ -1,18 +1,22 @@
 /**
  * 块 7 · 选择状态
  *
- * 只存两个字段：这张画用的 seed、祝福语被钉在了第几句。
+ * 三颗种子各管一件事，这是整条线最容易被改坏的地方：
+ *   seed      —— 画面（配色 × 角色 × 粒子）
+ *   wishSeed  —— 祝福语
+ *   presetIndex —— 用户点「换一句」钉住的那句（null = 没钉，跟着 wishSeed 走）
+ *
+ * 为什么祝福语要单独一颗 wishSeed，而不是继续挂在 seed 上：
+ *   挂在 seed 上时，"换一张"必然连祝福语一起换。可用户的心理模型是
+ *   「画面归画面，文案归文案」—— 喜欢这句话、只想换张画，是极常见的动作。
+ *   拆成两颗后：换画面不碰 wishSeed，换句子不碰 seed，两个方向都干净。
+ *
+ * 兼容旧链接：老链接只有 s，没有 ws。此时 wishSeed 缺省等于 seed，
+ * 而 pickWishIndex 内部还有自己的盐值，算出来和旧版一模一样 ——
+ * 已经发出去的链接不会突然换一句话。
+ *
  * 任何外部输入（storage、分享参数）进来都要过 normalize ——
  * seed 不像短码、索引越界、存储被塞了脏数据，都回退到默认值，绝不抛错白屏。
- *
- * 为什么状态里存 seed 而不是"模板 id"：
- *   模板只有 3 套，用户两天就看腻了；seed 能放出上亿张，而且
- *   同一颗 seed 在任何设备上都能复现同一张图，分享才有意义。
- *
- * presetIndex 有三态：
- *   null      = 跟着 seed 随机（默认）。换一张，句子也跟着换
- *   0..n-1    = 用户点了「换一句」钉住的这一句，换画面时不被冲掉
- *   脏数据     = 收敛成 null，退回随机，而不是强行给个 0（0 会被当成"用户选了第一句"）
  */
 
 import { CARD_STORAGE_KEY } from './config'
@@ -22,13 +26,18 @@ import { clampName, sanitizeText } from './safety'
 /**
  * 默认状态。传 seed 时用它开局（测试与分享入口需要确定性）
  *
+ * wishSeed 缺省跟 seed 走：一是兼容旧链接，二是初次进入时
+ * "画面和文案都由同一颗种子决定"读起来最自然，分享一次能复现两样。
+ *
  * toName / fromName 用 null 而不是 '' 表示"没填"：
  *   绘制层要区分"没填"（不画称呼行）和"填了空"（也不画，但语义不同），
  *   后续做"填了又删掉"的交互时，null 和 '' 的差别会立刻显出来。
  */
-export function createState(card, seed) {
+export function createState(card, seed, wishSeed) {
+  const artSeed = normalizeSeed(seed == null ? randomSeed() : seed)
   return {
-    seed: normalizeSeed(seed == null ? randomSeed() : seed),
+    seed: artSeed,
+    wishSeed: wishSeed == null ? artSeed : normalizeSeed(wishSeed),
     presetIndex: null,
     toName: null,
     fromName: null
@@ -48,31 +57,42 @@ export function normalizeState(card, raw) {
   const n = Math.floor(Number(src.seed))
   const seed = Number.isFinite(n) && n > 0 ? normalizeSeed(n) : randomSeed()
 
-  // null / undefined / 空串 / 越界 一律回到"跟 seed 随机"
+  // 祝福语种子缺省 = seed，旧链接与旧存储靠这一条保持原样
+  const w = Math.floor(Number(src.wishSeed))
+  const wishSeed = Number.isFinite(w) && w > 0 ? normalizeSeed(w) : seed
+
+  // null / undefined / 空串 / 越界 一律回到"跟 wishSeed 随机"
   let presetIndex = null
   if (src.presetIndex !== null && src.presetIndex !== undefined && src.presetIndex !== '') {
     const idx = Number(src.presetIndex)
     if (Number.isInteger(idx) && idx >= 0 && idx < presets.length) presetIndex = idx
   }
 
-  return { seed, presetIndex, toName: clampName(src.toName), fromName: clampName(src.fromName) }
+  return {
+    seed,
+    wishSeed,
+    presetIndex,
+    toName: clampName(src.toName),
+    fromName: clampName(src.fromName)
+  }
 }
 
 /**
- * 换一张：换一颗新种子，整张卡重抽 —— 画面换、祝福语也跟着换。
+ * 换一张：只换画面
  *
- * 连 presetIndex 一起清空是刻意的：如果保留手选的句子，
- * 用户点过一次「换一句」之后，再怎么点「换一张」句子都不会变了，
- * 那"随机祝福语"就名存实亡。想留住某句，就点「换一句」退回去。
+ * 这里**不动** wishSeed，也不动 presetIndex：
+ * 用户说"换卡片的时候不换祝福语"，那就一个字都不能碰文案。
+ * 想换句子有「换一句」，两个按钮各管一件事，不会互相牵连。
  */
 export function reroll(state) {
-  return { ...state, seed: randomSeed(), presetIndex: null }
+  return { ...state, seed: randomSeed() }
 }
+
 
 /**
  * 这一张实际用的是第几句祝福
  *
- * 钉住过就用钉住的那句，否则由 seed 决定。
+ * 钉住过就用钉住的那句，否则由 **wishSeed** 决定 —— 注意不是 seed。
  * 所有"图上写什么"的地方都必须走这里，不能各算各的。
  */
 export function resolveWishIndex(state, card) {
@@ -80,7 +100,8 @@ export function resolveWishIndex(state, card) {
   if (!presets.length) return 0
   const pinned = state && state.presetIndex
   if (Number.isInteger(pinned) && pinned >= 0 && pinned < presets.length) return pinned
-  return pickWishIndex(state && state.seed, presets.length)
+  const wishSeed = state && state.wishSeed != null ? state.wishSeed : state && state.seed
+  return pickWishIndex(wishSeed, presets.length)
 }
 
 /** 切换祝福语（指定第几句） */
@@ -89,7 +110,7 @@ export function selectPreset(state, card, index) {
 }
 
 /**
- * 「换一句」：换一句**一定不同**的
+ * 「换一句」：换一句**一定不同**的，画面完全不动
  *
  * 随机步长而不是固定 +1：固定 +1 连点两次会回到原句，
  * 用户会以为按钮坏了。步长取 1..n-1，保证 (cur + step) % n !== cur。

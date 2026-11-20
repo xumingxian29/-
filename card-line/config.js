@@ -47,6 +47,14 @@ export const CARD_NAME = {
 /** 白卡内边距 */
 export const CARD_PAPER = { padX: 44, padV: 34 }
 
+/**
+ * 背景音乐默认值
+ *
+ * 主题里 card.music 没写时用这一份。音量刻意很低（0.18）：
+ * 这是贺卡页不是音乐播放器，压过环境音就已经过量了。
+ */
+export const CARD_MUSIC = { enabled: true, tempo: 120, volume: 0.18 }
+
 /** canvas 字体栈：必须是系统字体，不引外链字体（画布不等待字体加载） */
 export const CARD_FONT = 'PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif'
 

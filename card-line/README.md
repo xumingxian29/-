@@ -33,7 +33,21 @@ H5 / 小程序双端都已实现，绘制层完全共用。
 朋友点开要看到一模一样那一张（连粒子位置都相同）。所以构图里一个 `Math.random()` 都不能有，
 全部走 `mulberry32` 确定性 PRNG。
 
-## 内部 15 块
+## 两颗种子：画面归画面，文案归文案
+
+`state` 里有三样东西各管一件事：
+
+| 字段 | 管什么 | 谁改它 |
+|---|---|---|
+| `seed` | 画面（配色 × 角色 × 粒子） | 「换一张」 |
+| `wishSeed` | 祝福语 | 进场时定一次，之后不动 |
+| `presetIndex` | 手动钉住的那一句 | 「换一句」 |
+
+`reroll()` 只改 `seed`，`nextWish()` 只改 `presetIndex` —— 所以
+**换一张不动祝福语，换一句不动画面**。分享链接因此多一个 `ws`（祝福种子），
+只在它和 `s` 不同时才带；老链接只有 `s` 时，`wishSeed` 回落成 `s`，句子与改版前一致。
+
+## 内部 18 块
 
 | 块 | 文件 | 职责 | 什么时候改 |
 |---|---|---|---|
@@ -49,9 +63,12 @@ H5 / 小程序双端都已实现，绘制层完全共用。
 | 10 | `state.js` | 选择状态、本地记忆、脏数据收敛 | 加状态字段 |
 | 11 | `export.h5.js` | H5 导出：blob + 下载 + 微信长按兜底 | 调保存行为 |
 | 12 | `export.mp.js` | 小程序导出：Canvas 2D 节点 + 存相册（含拒权引导） | 调保存行为 |
-| 13 | `export.js` | 导出壳选择（**唯一**条件编译点） | 接新端时 |
+| 13 | `export.js` | 导出壳选择（平台分叉点之一） | 接新端时 |
 | 14 | `share.js` | 分享链接、分享动作、入口参数解析 | 调分享 |
-| 15 | `index.js` | 对外唯一出口 | 加导出项 |
+| 15 | `music.h5.js` | H5 背景音乐：Web Audio 现场合成铃铛旋律 | 换曲子或音色 |
+| 16 | `music.mp.js` | 小程序背景音乐：InnerAudioContext 播主题里的 `src` | 提供音频源时 |
+| 17 | `music.js` | 音乐壳选择（平台分叉点之二） | 接新端时 |
+| 18 | `index.js` | 对外唯一出口 | 加导出项 |
 
 外加 `card.vue`（页面），只 import `@/card`，不碰 canvas，不出现颜色字面量。
 
@@ -72,9 +89,13 @@ import {
 } from '@/card'
 ```
 
-`resolveSelection(state, card)` 是核心一句：把 `{ seed, presetIndex }` 变成
-`{ template, art, wish }`，其中 `art` 就是一份可以直接交给 `drawCard` 的画稿。
+`resolveSelection(state, card)` 是核心一句：把 `{ seed, wishSeed, presetIndex, toName, fromName }` 变成
+`{ template, art, wish, greeting, footer }`，其中 `art` 就是一份可以直接交给 `drawCard` 的画稿。
 文案在这一步过内容安全闸，命中就地换掉，不抛错。
+
+背景音乐不引 mp3：版权与体积都是坑。H5 端合成一段公有领域的铃儿响叮当
+（`MELODY` 是纯数据，音色是两个振荡器叠出来的），小程序端没有 Web Audio，
+只有 `theme.card.music.src` 填了音频地址才会出现播放按钮。
 
 ## 依赖
 

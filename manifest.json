@@ -59,7 +59,7 @@
     "card-line/index.js": "src/card/index.js",
     "card-line/layout.js": "src/card/layout.js",
     "card-line/mascots.js": "src/card/mascots.js",
-    "card-line/motifs.js": "src/card/motifs.js",
+    "card-line/motifs.js": "src/card/motifs.js", "card-line/music.js": "src/card/music.js", "card-line/music.h5.js": "src/card/music.h5.js", "card-line/music.mp.js": "src/card/music.mp.js",
     "card-line/random.js": "src/card/random.js",
     "card-line/render.js": "src/card/render.js",
     "card-line/safety.js": "src/card/safety.js",

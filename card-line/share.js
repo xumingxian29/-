@@ -15,27 +15,35 @@
 
 import { buildUrl, copyText } from '@/core/share'
 import { CARD_PATH } from './config'
-import { decodeSeed, encodeSeed } from './random'
+import { decodeSeed, encodeSeed, normalizeSeed } from './random'
 
 /**
  * 构造贺卡分享链接
- * 保留 sharecode，把 seed 带过去；祝福语被钉住过（用户点了「换一句」）时再带一个 w。
  *
- * 为什么祝福语要进链接：
- *   链接里只有 seed 时，祝福语由 seed 决定，能复现；
- *   可用户一旦按了「换一句」，这句话就脱离了 seed —— 不带上 w，
- *   朋友点开看到的是"按 seed 抽出来的那句"，和图上印的不是同一句。
+ * 三个参数各管一件事，缺一个朋友看到的就不是同一张卡：
+ *   s  = 画面种子
+ *   ws = 祝福语种子（只在它和画面种子不同时才带，链接才不啰嗦）
+ *   w  = 被「换一句」钉住的句子下标（钉住了才带，它的优先级高于 ws）
+ *
+ * 为什么必须有 ws：
+ *   祝福语已经和画面解耦 —— 用户换过画面之后，wishSeed 仍是进场时那颗，
+ *   和 s 不再相等。只带 s 的话，朋友点开算出来的是"按这张画的种子抽的句子"，
+ *   和图上印的不是同一句。
  */
-export function buildCardShareUrl({ seed, wishIndex } = {}) {
+export function buildCardShareUrl({ seed, wishSeed, wishIndex } = {}) {
   const code = seed == null ? '' : encodeSeed(seed)
   const params = {}
   if (code) params.s = code
+
+  if (wishSeed != null && normalizeSeed(wishSeed) !== normalizeSeed(seed)) {
+    params.ws = encodeSeed(wishSeed)
+  }
   if (Number.isInteger(wishIndex) && wishIndex >= 0) params.w = String(wishIndex)
   return buildUrl(CARD_PATH, params)
 }
 
 /**
- * 解析进入参数：从分享链接来的 seed 与祝福语下标
+ * 解析进入参数：从分享链接来的画面种子、祝福种子与祝福语下标
  *
  * 分享参数是外部输入，可能是任何人手改的字符串 ——
  * 解析不出来就返回 null，让页面走"随机一张"，不报错、不白屏。
@@ -43,9 +51,10 @@ export function buildCardShareUrl({ seed, wishIndex } = {}) {
 export function parseCardEntry(options = {}) {
   let raw = options.s || options.seed || ''
   let rawW = options.w == null ? '' : String(options.w)
+  let rawWs = options.ws == null ? '' : String(options.ws)
 
   // #ifdef H5
-  if (!raw || !rawW) {
+  if (!raw || !rawW || !rawWs) {
     try {
       const hashQuery = (window.location.hash || '').split('?')[1] || ''
       const search = window.location.search.slice(1)
@@ -53,6 +62,7 @@ export function parseCardEntry(options = {}) {
       const fromSearch = new URLSearchParams(search)
       raw = raw || fromHash.get('s') || fromSearch.get('s') || ''
       rawW = rawW || fromHash.get('w') || fromSearch.get('w') || ''
+      rawWs = rawWs || fromHash.get('ws') || fromSearch.get('ws') || ''
     } catch (e) {
       /* ignore */
     }
@@ -62,7 +72,7 @@ export function parseCardEntry(options = {}) {
   const seed = decodeSeed(String(raw || ''))
   const n = Number(rawW)
   const wishIndex = rawW !== '' && Number.isInteger(n) && n >= 0 ? n : null
-  return { seed, wishIndex }
+  return { seed, wishSeed: decodeSeed(String(rawWs || '')), wishIndex }
 }
 
 /**

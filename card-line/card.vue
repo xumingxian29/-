@@ -1,8 +1,19 @@
 <template>
   <view class="page" :style="vars">
     <view class="hd">
-      <text class="hd__title">{{ card.copy.title }}</text>
-      <text class="hd__sub">{{ card.copy.sub }}</text>
+      <view class="hd__txt">
+        <text class="hd__title">{{ card.copy.title }}</text>
+        <text class="hd__sub">{{ card.copy.sub }}</text>
+      </view>
+      <!-- 音乐开关：默认开着，曲目是《圣诞快乐》。小程序没配音频源时整块不显示 -->
+      <view v-if="musicSupported" class="music" :class="{ 'music--on': musicPlaying }" @click="toggleMusic">
+        <view class="music__bars">
+          <text class="music__bar"></text>
+          <text class="music__bar"></text>
+          <text class="music__bar"></text>
+        </view>
+        <text class="music__txt">{{ musicPlaying ? card.copy.musicOn : card.copy.musicOff }}</text>
+      </view>
     </view>
 
     <view class="steps">
@@ -156,6 +167,7 @@ import {
   CARD_CANVAS,
   CARD_CANVAS_ID,
   CARD_FILE_PREFIX,
+  CARD_MUSIC,
   MAX_NAME_LEN,
   pickCardTheme,
   createState,
@@ -172,7 +184,8 @@ import {
   encodeSeed,
   buildCardShareUrl,
   parseCardEntry,
-  shareCard
+  shareCard,
+  createMusic
 } from '@/card'
 
 // 主题与卡片配置在初始化时定死：贺卡页不支持运行中切主题
@@ -203,6 +216,80 @@ const nameError = ref('')
 
 /** 名字长度上限，与清洗闸同一个来源，不在页面里写死 */
 const maxNameLen = MAX_NAME_LEN
+
+/* ---------------- 背景音乐 ---------------- */
+
+/**
+ * 「想播」和「真在响」是两件事，必须分开存
+ *
+ * 浏览器的自动播放策略：没有用户手势，AudioContext 建出来就是 suspended。
+ * 所以默认状态是 musicPlaying=false 但"想播"—— 页面先尝试一次，
+ * 被拦下就等第一次触摸接上，用户看到的是"点了就响"，而不是一个假装在响的喇叭。
+ */
+const musicSupported = ref(false)
+const musicPlaying = ref(false)
+let music = null
+
+function musicConfig() {
+  return card.music || CARD_MUSIC
+}
+
+function ensureMusic() {
+  if (music) return music
+  const cfg = musicConfig()
+  if (cfg.enabled === false) return null
+  music = createMusic({
+    tempo: cfg.tempo,
+    volume: cfg.volume,
+    src: cfg.src,
+    /**
+     * 状态以回调为准，而不是 start() 的返回值：
+     * 浏览器要等用户手势，AudioContext 的 resume 是异步的，
+     * start() 当场只能回答"我试了"，回答不了"现在响没响"。
+     */
+    onChange: (on) => {
+      musicPlaying.value = !!on
+    }
+  })
+  musicSupported.value = !!(music && music.supported)
+  return music.supported ? music : null
+}
+
+function startMusic() {
+  const m = ensureMusic()
+  if (!m) return false
+  return m.start()
+}
+
+function stopMusic() {
+  if (music) music.stop()
+  musicPlaying.value = false
+}
+
+function toggleMusic() {
+  if (musicPlaying.value) stopMusic()
+  else startMusic()
+}
+
+// #ifdef H5
+/**
+ * 等第一次手势
+ *
+ * 三个事件都挂：手机上一般只有 touchstart，桌面上是 pointerdown 或 keydown。
+ * capture 阶段监听，保证在页面里任何按钮的点击之前就接上。
+ */
+function armMusicGesture() {
+  const kick = () => {
+    document.removeEventListener('pointerdown', kick, true)
+    document.removeEventListener('touchstart', kick, true)
+    document.removeEventListener('keydown', kick, true)
+    if (!musicPlaying.value) startMusic()
+  }
+  document.addEventListener('pointerdown', kick, true)
+  document.addEventListener('touchstart', kick, true)
+  document.addEventListener('keydown', kick, true)
+}
+// #endif
 
 const stepLabels = computed(() => [
   card.copy.stepArt,
@@ -252,18 +339,38 @@ const saveTip = computed(() => {
 // 小程序转发：path 已经是 '/pages/card/card?s=xxx'（buildUrl 的非 H5 分支）
 onShareAppMessage(() => ({
   title: card.copy.title,
-  path: buildCardShareUrl({ seed: state.value.seed, wishIndex: pinnedWishIndex() }),
+  path: shareUrl(),
   imageUrl: resultUrl.value || previewUrl.value || ''
 }))
 
 onShareTimeline(() => ({
   title: card.copy.title,
-  query: 's=' + encodeSeed(state.value.seed) + (pinnedWishIndex() == null ? '' : '&w=' + pinnedWishIndex()),
+  // 查询串从同一条链接里切出来，避免两处各拼一次、早晚拼不一样
+  query: shareQuery(),
   imageUrl: resultUrl.value || previewUrl.value || ''
 }))
 // #endif
 
-/** 祝福语被「换一句」钉住过才需要进链接；null 表示由 seed 决定，不用带 */
+/**
+ * 分享链接：画面种子、祝福种子、钉住的句子一次带全
+ *
+ * 三个参数少一个，朋友点开看到的就是"另一张卡"，而不是"同一张"。
+ */
+function shareUrl() {
+  return buildCardShareUrl({
+    seed: state.value.seed,
+    wishSeed: state.value.wishSeed,
+    wishIndex: pinnedWishIndex()
+  })
+}
+
+function shareQuery() {
+  const url = shareUrl()
+  const at = url.indexOf('?')
+  return at >= 0 ? url.slice(at + 1) : ''
+}
+
+/** 祝福语被「换一句」钉住过才需要进链接；null 表示由 wishSeed 决定，不用带 */
 function pinnedWishIndex() {
   const i = state.value.presetIndex
   return Number.isInteger(i) && i >= 0 ? i : undefined
@@ -272,10 +379,23 @@ function pinnedWishIndex() {
 onLoad((options) => {
   const entry = parseCardEntry(options || {})
   let next = loadState(card)
-  // 分享链接里带了 seed 就用它 —— 朋友点开看到的是同一张
-  if (entry.seed) next = { ...next, seed: entry.seed }
-  // 连同祝福语一起还原，否则"同一张"只对了一半
+
+  /**
+   * 分享链接里带了 seed 就用它 —— 朋友点开看到的是同一张。
+   * 祝福语种子必须同时定下来：没带 ws 的旧链接，按"wishSeed = s"还原，
+   * 这正是旧版的行为，老链接不会突然换一句话。
+   */
+  if (entry.seed) {
+    next = {
+      ...next,
+      seed: entry.seed,
+      wishSeed: entry.wishSeed != null ? entry.wishSeed : entry.seed,
+      presetIndex: null
+    }
+  }
+  // 被「换一句」钉住过的，w 的优先级高于 ws
   if (entry.wishIndex != null) next = { ...next, presetIndex: entry.wishIndex }
+
   state.value = next
   saveState(next)
   // 名字不落盘，正常情况下是空的；旧存储里若残留也不算数，仍走同一道归一
@@ -290,10 +410,23 @@ onLoad((options) => {
  */
 onReady(() => {
   renderPreview()
+
+  // #ifdef H5
+  // 默认就播：先试着起一次（少数域名允许自动播放），拦下就等第一次手势
+  if (musicConfig().enabled !== false) {
+    ensureMusic()
+    startMusic()
+    armMusicGesture()
+  }
+  // #endif
 })
 
 onUnload(() => {
   if (nameTimer) clearTimeout(nameTimer)
+  if (music) {
+    music.dispose()
+    music = null
+  }
   releaseUrl(previewUrl.value)
   releaseUrl(resultUrl.value)
 })
@@ -339,6 +472,12 @@ async function renderPreview() {
   }
 }
 
+/**
+ * 换一张：只换画面
+ *
+ * reroll 只动 seed，wishSeed 与 presetIndex 原样保留 ——
+ * 这张卡的祝福语在"换一张"之后必须还是同一句，用户是这么理解的。
+ */
 function onReroll() {
   if (drawing.value || busy.value) return
   state.value = reroll(state.value)
@@ -346,12 +485,17 @@ function onReroll() {
   renderPreview()
 }
 
+/**
+ * 换一句：只换文案
+ *
+ * 不碰 seed，所以画面一格都不动。这里重绘是必须的 ——
+ * 祝福语印在图上，不重画就会出现"页面写着 A、图里印着 B"。
+ */
 function onNextWish() {
   if (drawing.value || busy.value) return
   state.value = nextWish(state.value, card)
   saveState(state.value)
   step.value = Math.max(step.value, 2)
-  // 祝福语印在图上，换了就必须重画，否则"预览"和"成图"说的不是一件事
   renderPreview()
 }
 
@@ -497,7 +641,7 @@ async function saveImage() {
 }
 
 async function onShare() {
-  const url = buildCardShareUrl({ seed: state.value.seed, wishIndex: pinnedWishIndex() })
+  const url = shareUrl()
   const r = await shareCard({ url, title: card.copy.title, text: card.copy.sub })
   if (r === 'copied') {
     uni.showToast({ title: card.copy.shareCopied, icon: 'none' })
@@ -522,7 +666,7 @@ function syncShare() {
   setupShare({
     title: card.copy.title,
     desc: card.copy.sub,
-    link: buildCardShareUrl({ seed: state.value.seed, wishIndex: pinnedWishIndex() }),
+    link: shareUrl(),
     imgUrl: ''
   })
   // #endif
@@ -541,9 +685,17 @@ function syncShare() {
 }
 
 .hd {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
   padding: 16px 20px 10px;
   /* 页面隐藏了系统导航栏（navigationStyle: custom），刘海屏要自己让出安全区 */
   padding-top: calc(16px + env(safe-area-inset-top));
+}
+.hd__txt {
+  flex: 1;
+  min-width: 0;
 }
 .hd__title {
   display: block;
@@ -556,6 +708,62 @@ function syncShare() {
   margin-top: 4px;
   font-size: 12px;
   color: var(--ft-text-sub);
+}
+
+/* 音乐开关：默认在播，三根柱子随节奏起伏；静音时压扁、只留轮廓 */
+.music {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+  padding: 6px 12px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+.music--on {
+  border-color: var(--ft-accent);
+  background: rgba(255, 255, 255, 0.12);
+}
+.music__bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 12px;
+}
+.music__bar {
+  width: 2px;
+  height: 4px;
+  border-radius: 1px;
+  background: var(--ft-text-sub);
+}
+.music--on .music__bar {
+  background: var(--ft-accent);
+  animation: music-beat 1.1s ease-in-out infinite;
+}
+.music--on .music__bar:nth-child(2) {
+  animation-delay: 0.18s;
+}
+.music--on .music__bar:nth-child(3) {
+  animation-delay: 0.36s;
+}
+@keyframes music-beat {
+  0%,
+  100% {
+    height: 4px;
+  }
+  50% {
+    height: 12px;
+  }
+}
+.music__txt {
+  font-size: 11px;
+  color: var(--ft-text-sub);
+}
+.music--on .music__txt {
+  color: var(--ft-text);
+  font-weight: 600;
 }
 
 .steps {

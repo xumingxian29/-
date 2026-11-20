@@ -14,7 +14,8 @@
  *   state.js      选择状态与本地记忆，脏数据收敛
  *   export.h5.js  H5 导出：blob + 下载 + 微信长按兜底
  *   export.mp.js  小程序导出：Canvas 2D 节点 + canvasToTempFilePath + 存相册
- *   export.js     导出壳选择（整条线唯一的平台分叉点）
+ *   export.js     导出壳选择（平台分叉点之一）
+ *   music.js      背景音乐壳（平台分叉点之二）：H5 合成 / 小程序音频文件
  *   share.js      分享链接与分享动作
  *
  * 页面只 import 这个文件，不直接摸内部模块。
@@ -29,7 +30,8 @@ export {
   CARD_PAPER,
   CARD_FONT,
   CARD_STORAGE_KEY,
-  CARD_FILE_PREFIX
+  CARD_FILE_PREFIX,
+  CARD_MUSIC
 } from './config'
 
 export { pickCardTheme, findMascot, styleSpaceSize } from './theme'
@@ -98,3 +100,5 @@ export { drawCard } from './render'
 export { renderCardBlob, downloadBlob, releaseUrl, isWechatIOS, isWechat } from './export'
 
 export { buildCardShareUrl, parseCardEntry, shareCard } from './share'
+
+export { createMusic } from './music'
